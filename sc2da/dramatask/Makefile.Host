@@ -1,0 +1,76 @@
+# Include file identifying the target architecture (defines the T_A
+# macro) and application configuration definitions
+
+APPLTASK        = sc2da
+HEADGEN         = headgen
+MCEXML_O        = ${APPLIC_INSTALL}/${APPLIC_VERSION}/bin/Linux/mcexml.o
+INTERFACE_O     = ${APPLIC_INSTALL}/${APPLIC_VERSION}/bin/Linux/interface.o
+INTERFACE_LIB   = interface
+DAS_LIB         = sc2dalib
+DAS_LIBSERVOSET = sc2dalibsetup
+DAS_LIBSERVO    = sc2dalibservo
+DAS_LIBLCKPT    = sc2daliblckpts
+SC2STORE_LIB    = sc2store
+SC2MATH_LIB     = sc2math
+SC2SQ1OPT_LIB   = sc2sqopt 
+SC2HEADMAN_LIB  = sc2headman
+DAS_INCLUDE     = sc2da_par.h sc2da_struct.h sc2da_help.h sc2da_actionstate.h \
+                 ${DAS_LIBSERVOSET}.h ${DAS_LIBSERVO}.h ${DAS_LIBLCKPT}.h \
+		 ${DAS_LIB}.h ${APPLTASK}.h 
+
+USE_DRAMA     = TRUE
+
+include $(TOP)/config/CONFIG
+
+# User compiler and loader flags
+# HOST_OPT = NO
+USR_CFLAGS   = -std=gnu99
+USR_INCLUDES = -DXML_NS -I${STARLINK}/include
+USR_LDFLAGS += -L${STARLINK}/lib
+USR_LDLIBS  += `ndg_link -drama` `kaplibs_link -nogrf`
+ 
+# Standard macros for files which are to be built and installed.
+# PROD (products) and SCRIPTS are installed in INSTALL_BIN
+PROD	= ${APPLTASK} findsq1optpoints
+          
+# Place user library names (i.e. sc2dalib) in PROD_LIBS and 
+# make will look for ${APPLIC_INSTALL}/${APPLIC_VERSION}/lib/Linux/libsc2dalib.a  
+# External libraries on which this directory is dependent.
+jit_DIR = $(INSTALL_LIB)
+
+# PROD_LIBS = jit expat $(SC2SQ1OPT_LIB) $(SC2MATH_LIB) $(DRAMA_LIBS) $(SC2STORE_LIB) pthread
+
+PROD_LIBS =  $(SC2SQ1OPT_LIB) $(SC2HEADMAN_LIB) $(SC2STORE_LIB) sc2ast sc2math jit expat sla $(DRAMA_LIBS)  pthread 
+
+
+# Place user object files in <prod>_LDFLAGS
+${APPLTASK}_LDFLAGS= ${MCEXML_O} ${INTERFACE_O}
+
+
+# INC is installed in INSTALL_INCLUDE  
+INC = sc2da_par.h sc2da_struct.h sc2da_help.h sc2da_actionstate.h sc2dalibsetup.h sc2daliblckpts.h
+
+# Rules for building targets
+include $(TOP)/config/RULES.Build
+
+# Rule for creating   ${DAS_LIB}.h  ${APPLTASK}.h
+
+${PROD} :  ../${DAS_LIBSERVOSET}.h ../${DAS_LIBSERVO}.h ../${DAS_LIBLCKPT}.h \
+           ../${DAS_LIB}.h ../${APPLTASK}.h
+ 
+../${DAS_LIBLCKPT}.h : ../${DAS_LIBLCKPT}.c
+	${HEADGEN} ../${DAS_LIBLCKPT}.c  ../${DAS_LIBLCKPT}.h  "/*+"
+
+../${DAS_LIBSERVOSET}.h : ../${DAS_LIBSERVOSET}.c
+	${HEADGEN} ../${DAS_LIBSERVOSET}.c  ../${DAS_LIBSERVOSET}.h  "/*+"
+
+../${DAS_LIBSERVO}.h : ../${DAS_LIBSERVO}.c
+	${HEADGEN} ../${DAS_LIBSERVO}.c  ../${DAS_LIBSERVO}.h  "/*+"
+
+../${DAS_LIB}.h : ../${DAS_LIB}.c
+	${HEADGEN} ../${DAS_LIB}.c  ../${DAS_LIB}.h  "/*+"
+
+../${APPLTASK}.h :  ../${APPLTASK}.c
+	${HEADGEN} ../${APPLTASK}.c  ../${APPLTASK}.h  "/*+"
+
+
