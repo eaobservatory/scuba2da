@@ -2,16 +2,36 @@
 #define HEADGEN____sc2dalib_h 
  
  
-/*+ sc2dalib_abortInit
+/*+ my_fclose
 */
-void sc2dalib_abortInit
-(
-SDSU_CONTEXT          *con,      
-dasInfoStruct_t       *myInfo,    
-char                  *dateTime,
-StatusType            *status
-);
+void my_fclose(FILE **fp);
 
+
+/**
+ * my_closeFiles
+ * Closes myInfo-> (fpData, fpMcecmd, fpBatch, Strchart, fpOtheruse)
+ *  Flushes log file.
+ *  Stat: used 2 times
+ */
+/*+ my_closeFiles
+*/
+void my_closeFiles(dasInfoStruct_t *myInfo);
+
+// =======sc2dalib_a*******
+//====================//
+
+/**
+ * \fn void sc2dalib_actionfileEnd(SDSU_CONTEXT *con, dasInfoStruct_t *myInfo, 
+ *     int flag, StatusType *status)
+ *
+ * \brief function
+ *  end Drama action and close file 
+ *
+ * \param con     SDSU_CONTXT struct pointer
+ * \param myInfo dasInfoStruct_t struct pointer
+ * \param flag   int  1: check IN_SEQ, 0, don't
+ * \param status  StatusType.  given and return
+ */
 /*+ sc2dalib_actionfileEnd 
 */
 void sc2dalib_actionfileEnd
@@ -69,14 +89,6 @@ void sc2dalib_callbkMsg
 (
 USED4DITS    *argptr,    
 StatusType   *status
-);
-
-/*+ sc2dalib_closeFiles
-*/
-void sc2dalib_closeFiles
-(
-dasInfoStruct_t *myInfo,
-StatusType      *status  
 );
 
 /*+ sc2dalib_closesharedMem   

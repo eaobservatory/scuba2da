@@ -562,6 +562,7 @@ StatusType *status
 {
   int          rval;
   char         dateTime[40];
+  long               in_sequence;
 
   if (*status != STATUS__OK) return;
   errno=0;   
@@ -575,8 +576,8 @@ StatusType *status
     ErsRep(0,status, "sc2da_Abort: DA is not in SEQUENCE application!!" );
     return;
   }
-  myInfo->actionFlag=ABORTACTION;  
-  fprintf(myInfo->fpLog,"\n<%s> CMD for sc2da_Abort\n",dateTime);
+  dasInfo.actionFlag=ABORTACTION;  
+  fprintf(dasInfo.fpLog,"\n<%s> CMD for sc2da_Abort\n",dateTime);
   //End abortInit
   sc2dalib_stopFrame(con,&dasInfo,&glbMceInx,dateTime,status);  
   if (*status != STATUS__OK)  

@@ -145,6 +145,50 @@ static MCE_CARD_DEF  mcecardStrt[]=
 };
 
 #define MCE_CARD_NO (int)( sizeof(mcecardStrt)/sizeof(MCE_CARD_DEF) )
+/**
+ * my_fclose
+ * Checks if file is closed, should be used before fopen
+ * Stat: used 25 times
+ */
+/*+ my_fclose
+*/
+void my_fclose(FILE **fp)
+{
+  if(fp == NULL || *fp == NULL)
+    {
+      return;
+    }
+  fclose(*fp);
+  *fp = NULL;
+}
+
+
+/**
+ * my_closeFiles
+ * Closes myInfo-> (fpData, fpMcecmd, fpBatch, Strchart, fpOtheruse)
+ *  Flushes log file.
+ *  Stat: used 2 times
+ */
+/*+ my_closeFiles
+*/
+void my_closeFiles(dasInfoStruct_t *myInfo)
+{
+  fflush(myInfo->fpLog);
+  my_fclose(&(myInfo->fpData));
+  jitDebug(2,"my_closeFiles: closed fpData\n"); 
+
+  my_fclose(&(myInfo->fpMcecmd));
+  jitDebug(2,"my_closeFiles: closed fpMcecmd\n"); 
+
+  my_fclose(&(myInfo->fpBatch));
+  jitDebug(2,"my_closeFiles: closed fpBatch\n"); 
+
+  my_fclose(&(myInfo->fpStrchart));
+  jitDebug(2,"my_closeFiles: closed fpStrchart\n"); 
+
+  my_fclose(&(myInfo->fpOtheruse));
+  jitDebug(2,"my_closeFiles: closed fpOtheruse\n"); 
+}
 
 // =======sc2dalib_a*******
 //====================//
@@ -179,7 +223,7 @@ StatusType      *status
     return;
   }
   sc2dalib_endAction(con,myInfo,status);
-  sc2dalib_closeFiles(myInfo,status);
+  my_closeFiles(myInfo);
 }
 
 
@@ -754,66 +798,6 @@ StatusType   *status
     } 
   }
 }
-
-
-/**
- * \fn void sc2dalib_closeFiles(dasInfoStruct_t *myInfo, StatusType *status)
- *
- * \brief function
- *  close all files
- *
- * \param myInfo  dasInfo structure pointer
- * \param *status  StatusType.  given and return
- *
- * Careful !! close unopened file will cause task to crash
- *
- */
-/*+ sc2dalib_closeFiles
-*/
-void sc2dalib_closeFiles
-(
-dasInfoStruct_t *myInfo,
-StatusType      *status  
-)
-{
-
-  if (*status != STATUS__OK) return;
- 
-  fflush(myInfo->fpLog);
-  if ( myInfo->fpData !=NULL)
-  {
-    jitDebug(2,"sc2dalib_closeFiles: closed fpData\n"); 
-    fclose(myInfo->fpData);
-  }
-  if ( myInfo->fpMcecmd !=NULL)
-  {
-  jitDebug(2,"sc2dalib_closeFiles: closed fpMcecmd\n"); 
-    fclose(myInfo->fpMcecmd);
-  }
-  if ( myInfo->fpBatch !=NULL)
-  {
-    jitDebug(2,"sc2dalib_closeFiles: closed fpBatch\n"); 
-    fclose(myInfo->fpBatch);
-  }
-  if ( myInfo->fpStrchart !=NULL)
-  {
-    jitDebug(2,"sc2dalib_closeFiles: closed fpStrchart\n"); 
-    fclose(myInfo->fpStrchart);
-  }
-  if ( myInfo->fpOtheruse !=NULL)
-  {
-    jitDebug(2,"sc2dalib_closeFiles: closed fpOtheruse\n"); 
-    fclose(myInfo->fpOtheruse);
-  }
-
-  myInfo->fpMcecmd=NULL;
-  myInfo->fpData=NULL;
-  myInfo->fpBatch=NULL;
-  myInfo->fpStrchart=NULL;
-  myInfo->fpOtheruse=NULL;
-}
-
-
 
 /**
  * \fn void sc2dalib_closesharedMem(dasInfoStruct_t *myInfo,
@@ -3272,7 +3256,7 @@ StatusType            *status
   sprintf (myInfo->logfileName, "/tmp/%s/logcmd",getenv("USER"));
 
   strcat(myInfo->logfileName,myInfo->Date);
-  myInfo->fpLog=NULL;
+  my_fclose(&(myInfo->fpLog));
   if((myInfo->fpLog = fopen64(myInfo->logfileName,"w")) == NULL )
   {
     *status = DITS__APP_ERROR;
@@ -3950,13 +3934,13 @@ StatusType            *status
 
   ArgPutString(myInfo->statId, "ARRAY_CNNTED",name, status);
   // change logfile to array related
-  fclose(myInfo->fpLog);
   sprintf (myInfo->logfileName, "%s/%s/logfile/logcmd", 
           getenv ("SC2LOGDIR"),name);
   strcpy(myInfo->logFile,myInfo->logfileName);
   SdpPutString(SC2DALOGFILE,myInfo->logFile, status);
   
   strcat(myInfo->logfileName,myInfo->Date);
+  my_fclose(&(myInfo->fpLog));
   if((myInfo->fpLog = fopen64(myInfo->logfileName, "a")) == NULL)
   {
     *status = DITS__APP_ERROR;
@@ -4083,9 +4067,7 @@ StatusType         *status
     ErsRep(0,status,"sc2dalib_heaterslopeInit: sc2dalibsetup_servoreadsetupWrap failed"); 
     return;
   }
-
-  sc2dalib_closeFiles(myInfo,status);
-
+  my_fclose(&(myInfo->fpBatch));
   if((myInfo->fpBatch = fopen(myInfo->batchFile,"r")) == NULL )
     {
       *status = DITS__APP_ERROR;
@@ -4102,20 +4084,18 @@ StatusType         *status
     // in sc2dalib__heatslope call sc2dalib_actionfileEnd to close file
     return;
   }
-
+  my_fclose(&(myInfo->fpData));
   if((myInfo->fpData = fopen( myInfo->dataFile, "a" )) == NULL )
     {
       *status = DITS__APP_ERROR;
       ErsRep (0, status, "Error- sc2dalib_heaterslopeInit:2 failed to open file %s", myInfo->dataFile); 
       return;
     }
-
   // use batchFile for storing the mean pixel data 
   sprintf(myInfo->batchFile,"%s-row%d-col%d",myInfo->dataFile, 
           myInfo->heatSlp.row, myInfo->heatSlp.col);
 
-  fclose(myInfo->fpBatch);
-  // in csae there is one
+  my_fclose(&(myInfo->fpBatch));
   if((myInfo->fpBatch = fopen(myInfo->batchFile, "w")) == NULL)
   {
     *status=DITS__APP_ERROR;
@@ -4124,8 +4104,7 @@ StatusType         *status
     // in sc2dalib__heatslope call sc2dalib_actionfileEnd to close files
     return;
   }
-  fclose(myInfo->fpBatch);
-  
+  my_fclose(&(myInfo->fpBatch));
   if((myInfo->fpBatch = fopen(myInfo->batchFile, "a")) == NULL)
   {
     *status=DITS__APP_ERROR;
@@ -4140,7 +4119,7 @@ StatusType         *status
   {
     sprintf(myInfo->strchartFile,"%s-row%d-col%d-pixel",myInfo->dataFile, 
           myInfo->heatSlp.row, myInfo->heatSlp.col);
-
+    my_fclose(&(myInfo->fpStrchart));
     if((myInfo->fpStrchart = fopen(myInfo->strchartFile, "w")) == NULL)
     {
       *status=DITS__APP_ERROR;
@@ -4149,7 +4128,7 @@ StatusType         *status
       // in sc2dalib__heatslope call sc2dalib_actionfileEnd to close file
       return;
     }
-    fclose(myInfo->fpStrchart);
+    my_fclose(&(myInfo->fpStrchart));
     if((myInfo->fpStrchart = fopen(myInfo->strchartFile, "a")) == NULL)
     {
       *status=DITS__APP_ERROR;
@@ -4261,6 +4240,7 @@ StatusType        *status
     // use cmdrepFile for the heater data file
     sprintf(myInfo->cmdrepFile,"%s/%s-%d-eng.txt",getenv("CURRENTDATADIR"),
             myInfo->heatSlp.base, i);
+    my_fclose(&(myInfo->fpOtheruse));
     if ((myInfo->fpOtheruse = fopen( myInfo->cmdrepFile, "r" )) == NULL)
     {  
       *status=DITS__APP_ERROR;
@@ -4305,8 +4285,7 @@ StatusType        *status
     powerPtr[i]=heat;
     weight[i]=1;
 
-    fclose(myInfo->fpOtheruse);
-    myInfo->fpOtheruse=NULL;
+    my_fclose(&(myInfo->fpOtheruse));
     
     MsgOut(status," %d frames average completed for (%s-%d)",
            howmany,  myInfo->heatSlp.base, i);
@@ -5080,7 +5059,7 @@ StatusType      *status
 {
   if (!StatusOkP(status)) return;
 
-  sc2dalib_closeFiles(myInfo,status);
+  my_closeFiles(myInfo);
 
   //filesvFlag !=1, don't save cmd-reply to fpMcecmd
 
@@ -8387,7 +8366,7 @@ StatusType            *status
       ErsRep(0,status,"sc2dalib_trkheaterInit: sc2dalibsetup_servoreadsetupWrap failed"); 
       return;
     }
-
+  my_fclose(&(myInfo->fpBatch));
   if((myInfo->fpBatch=fopen(myInfo->batchFile,"r")) == NULL )
     {
       *status = DITS__APP_ERROR;
@@ -8401,19 +8380,14 @@ StatusType            *status
   sc2dalib_heaterslopeRead(myInfo, heaterSlope, status);
 
   sc2dalibsetup_readheaterSetup(myInfo,status);
-
-  jitDebug(16,"sc2dalib_trkheatInit: finish readheaterSetup\n");
-  
-  fclose(myInfo->fpBatch);
-  
-  // enable closefile to work
-  myInfo->fpBatch=NULL;
   if ( !StatusOkP(status) )
     {
       ErsRep(0,status,"sc2dalib_trkheaterInit: sc2dalib_readheaterSetup failed"); 
       return;
     }
-
+  jitDebug(16,"sc2dalib_trkheatInit: finish readheaterSetup\n");
+  my_fclose(&(myInfo->fpBatch));
+  
   // Build up the goCmd always use rcs card
   sprintf(mceCard, "rcs");
   sprintf(myInfo->goCmd, "GO %s ret_dat 1",mceCard);
@@ -9073,7 +9047,7 @@ StatusType            *status
         "sc2dalib_getsq2fbparaInit: sc2dalibsetup_servoreadsetupWrap failed"); 
     return;
   }
-
+  my_fclose(&(myInfo->fpBatch));
   if((myInfo->fpBatch=fopen(myInfo->batchFile,"r")) == NULL )
     {
       *status = DITS__APP_ERROR;
@@ -9083,16 +9057,13 @@ StatusType            *status
   jitDebug(16,"sc2dalib_getsq2fbparaInit read: %s\n",myInfo->batchFile);
 
   sc2dalibsetup_servoreadSetup(myInfo,arrayset,status);
-  jitDebug(16,"sc2dalib_getsq2fbparaInit finish servoreadSetup\n");
-
-  // enable closefile to work
-  fclose(myInfo->fpBatch);
-  myInfo->fpBatch=NULL;
   if ( !StatusOkP(status) )
   {
     ErsRep(0,status,"sc2dalib_getsq2fbparaInit: sc2dalib_servoreadSetup failed"); 
     return;
   }
+  jitDebug(16,"sc2dalib_getsq2fbparaInit finish servoreadSetup\n");
+  my_fclose(&(myInfo->fpBatch));
 
   if (arrayset->slopSelect[0] <0 )
   {
@@ -9117,7 +9088,7 @@ StatusType            *status
   // fix stripchart name for disply tracking result, 
   //inside it, the col are: == No sq2fb delta sq2fbopt ...(32 col)  ==
   sprintf(myInfo->strchartFile,"%s/trksq2fb.txt", getenv("ORAC_DATA_OUT") );
-
+  my_fclose(&(myInfo->fpStrchart));
   if ((myInfo->fpStrchart=fopen64(myInfo->strchartFile,"a"))==NULL)
   {
     *status = DITS__APP_ERROR;
@@ -9267,7 +9238,7 @@ StatusType            *status
         "sc2dalib_trksq2fbInit: sc2dalibsetup_servoreadsetupWrap failed"); 
     return;
   }
-
+  my_fclose(&(myInfo->fpBatch));
   if((myInfo->fpBatch=fopen(myInfo->batchFile,"r")) == NULL )
     {
       *status = DITS__APP_ERROR;
@@ -9297,15 +9268,14 @@ StatusType            *status
   // always remove previous tmp setupfile
   sprintf( tmp, "rm -f %s",myInfo->batchFile);
   system ( tmp);
-
-  // enable closefile to work
-  fclose(myInfo->fpBatch);
-  myInfo->fpBatch=NULL;
+  my_fclose(&(myInfo->fpBatch));
+  /* Orphaned?
   if ( !StatusOkP(status) )
   {
     ErsRep(0,status,"sc2dalib_trksq2fbInit: sc2dalib_readsq2fbSsetup failed"); 
     return;
   }
+  */
 
   //populate cmd buff myCmd.cmdBuf,always use rcs now
   jitDebug(16,"populate cmd buff\n");
@@ -10435,6 +10405,7 @@ StatusType            *status
   }
   *option=flag;
   jitDebug(2,"_sq1optptsInit:sq1optPoint=%s\n",myInfo->batchFile);
+  my_fclose(&(myInfo->fpBatch));
   if ((myInfo->fpBatch = fopen(myInfo->batchFile,"r")) == NULL)
   {
     *status = DITS__APP_ERROR;
@@ -11405,7 +11376,7 @@ StatusType *status
     sprintf(tmpfile, "%s-pixel",myInfo->dataFile);
     //  bad pixel if squal=1 
     sc2dalib_writepixelInx(myInfo,setup,tmpfile,squal,0,status);
-
+    my_fclose(&(myInfo->fpData));
     if((myInfo->fpData = fopen( myInfo->dataFile, "w" )) == NULL )
       {
 	*status = DITS__APP_ERROR;
@@ -11455,7 +11426,7 @@ StatusType *status
       }
     }
     fprintf ( myInfo->fpData, "\n" );
-    fclose ( myInfo->fpData); myInfo->fpData=NULL;
+    my_fclose(&(myInfo->fpData));
   }
 }
 
