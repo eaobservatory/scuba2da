@@ -264,14 +264,6 @@ int           howMany,
 StatusType    *status
 );
 
-/*+ sc2dalib_dispRevision - 
-*/
-void sc2dalib_dispRevision
-(
-dasCmdInfo_t  *mycmdInfo, 
-StatusType    *status
-);
-
 /*+ sc2dalib_downld2pciInit
 */
 void sc2dalib_downld2pciInit

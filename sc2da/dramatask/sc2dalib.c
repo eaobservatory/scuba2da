@@ -145,6 +145,10 @@ static MCE_CARD_DEF  mcecardStrt[]=
 };
 
 #define MCE_CARD_NO (int)( sizeof(mcecardStrt)/sizeof(MCE_CARD_DEF) )
+
+// =======my_
+//====================//
+
 /**
  * my_fclose
  * Checks if file is closed, should be used before fopen
@@ -2251,7 +2255,13 @@ StatusType            *status
              (mycmdInfo->reply.status == MCE_RBOK) 
     )  
   {
-     sc2dalib_dispRevision(mycmdInfo,status);
+    int buildNo, minorNo, majorNo;
+    //print revision 
+    buildNo=(int)( (mycmdInfo->reply.data[1]    )&0x0000FFFF );
+    minorNo=(int)( (mycmdInfo->reply.data[1]>>16)&0x000000FF );
+    majorNo=(int)( (mycmdInfo->reply.data[1]>>24)&0x000000FF );
+    MsgOut(status,"%s => Revision %d .%d build %d", 
+	   mycmdInfo->mceCmd,majorNo,minorNo,buildNo);
   }
   else if( ( strstr(mycmdInfo->mceCmd,heatString)!= NULL ||
              strstr(mycmdInfo->mceCmd,arrayString)!= NULL ||
@@ -2332,36 +2342,6 @@ StatusType    *status
 
 
 /**
- * \fn void sc2dalib_dispRevision(dasCmdInfo_t *mycmdInfo,StatusType *status)
- *
- * \brief functaion
- *  display firmware revision of MCE cards 
- *
- *\param mycmdInfo  dasCmdInfo_t structure pointer 
- *\param status     StatusType.  given and return
- */
-/*+ sc2dalib_dispRevision - 
-*/
-void sc2dalib_dispRevision
-(
-dasCmdInfo_t  *mycmdInfo, 
-StatusType    *status
-)
-{
-  int   buildNo,minorNo, majorNo;
-
-  if (!StatusOkP(status)) return;
-
-  //print revision 
-  buildNo=(int)( (mycmdInfo->reply.data[1]    )&0x0000FFFF );
-  minorNo=(int)( (mycmdInfo->reply.data[1]>>16)&0x000000FF );
-  majorNo=(int)( (mycmdInfo->reply.data[1]>>24)&0x000000FF );
-  MsgOut(status,"%s => Revision %d .%d build %d", 
-          mycmdInfo->mceCmd,majorNo,minorNo,buildNo);   
-}  
-
-
-/**
  * \fn void sc2dalib_downld2pciInit(SDSU_CONTEXT *con,dasInfoStruct_t *myInfo, 
  *   char *file, char *dateTime, StatusType *status)
  *
@@ -2410,7 +2390,7 @@ StatusType            *status
 	     FILE_LEN, file, NULL, status );
   if ( !StatusOkP(status) )
   {
-    ErsRep(0,status,"sc2dalib_downld2pciInit: failed to get DSP_FILEE"); 
+    ErsRep(0,status,"sc2dalib_downld2pciInit: failed to get DSP_FILE"); 
     return;
   }
   fprintf(myInfo->fpLog,"\n<%s> CMD from sc2dalib__Download2PCI <%s>\n",
@@ -2699,7 +2679,7 @@ StatusType            *status
   sc2dalib_sendCmd(con,myInfo,&frameCmd,mceInxpt,dateTime,status); 
   if ( !StatusOkP(status) )
   {
-    ErsRep(0,status,"sc2dalib_frametakeInit: sc2dalib_sendCmd %s failed",
+    ErsRep(0,status,"sc2dalib_frametakeInit(1): sc2dalib_sendCmd %s failed",
            frameCmd.mceCmd); 
     return;
   }
@@ -2709,7 +2689,7 @@ StatusType            *status
   sc2dalib_sendCmd(con,myInfo,&frameCmd,mceInxpt,dateTime,status); 
   if ( !StatusOkP(status) )
   { 
-     ErsRep(0,status,"sc2dalib_frametakeInit: sc2dalib_sendCmd %s failed",
+     ErsRep(0,status,"sc2dalib_frametakeInit(2): sc2dalib_sendCmd %s failed",
             frameCmd.mceCmd); 
      return;
   }
@@ -4099,21 +4079,12 @@ StatusType         *status
   if((myInfo->fpBatch = fopen(myInfo->batchFile, "w")) == NULL)
   {
     *status=DITS__APP_ERROR;
-    ErsRep(0,status,"sc2dalib_heaterslopeInit: failed to open %s, check permission",
+    ErsRep(0,status,
+	   "sc2dalib_heaterslopeInit: failed to open %s, check permission",
            myInfo->batchFile); 
     // in sc2dalib__heatslope call sc2dalib_actionfileEnd to close files
     return;
   }
-  my_fclose(&(myInfo->fpBatch));
-  if((myInfo->fpBatch = fopen(myInfo->batchFile, "a")) == NULL)
-  {
-    *status=DITS__APP_ERROR;
-    ErsRep(0,status,"sc2dalib_heaterslopeInit: failed to open %s, check permission",
-           myInfo->batchFile); 
-    // in sc2dalib__heatslope call sc2dalib_actionfileEnd to close files
-    return;
-  }
-
   // use strchartFile for storing the pixel data ( every point) 
   if(myInfo->filesvFlag >0 )
   {
@@ -4123,16 +4094,8 @@ StatusType         *status
     if((myInfo->fpStrchart = fopen(myInfo->strchartFile, "w")) == NULL)
     {
       *status=DITS__APP_ERROR;
-      ErsRep(0,status,"sc2dalib_heaterslopeInit: failed to open %s, check permission",
-           myInfo->strchartFile);
-      // in sc2dalib__heatslope call sc2dalib_actionfileEnd to close file
-      return;
-    }
-    my_fclose(&(myInfo->fpStrchart));
-    if((myInfo->fpStrchart = fopen(myInfo->strchartFile, "a")) == NULL)
-    {
-      *status=DITS__APP_ERROR;
-      ErsRep(0,status,"sc2dalib_heaterslopeInit: failed to open %s, check permission",
+      ErsRep(0,status,
+	     "sc2dalib_heaterslopeInit: failed to open %s, check permission",
            myInfo->strchartFile);
       // in sc2dalib__heatslope call sc2dalib_actionfileEnd to close file
       return;
@@ -9269,13 +9232,6 @@ StatusType            *status
   sprintf( tmp, "rm -f %s",myInfo->batchFile);
   system ( tmp);
   my_fclose(&(myInfo->fpBatch));
-  /* Orphaned?
-  if ( !StatusOkP(status) )
-  {
-    ErsRep(0,status,"sc2dalib_trksq2fbInit: sc2dalib_readsq2fbSsetup failed"); 
-    return;
-  }
-  */
 
   //populate cmd buff myCmd.cmdBuf,always use rcs now
   jitDebug(16,"populate cmd buff\n");

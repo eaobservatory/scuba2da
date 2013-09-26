@@ -1125,12 +1125,12 @@ StatusType      *status
     ErsRep(0,status,msg);
     return;
   }
-  fclose(myInfo->fpSq1);
 
   if ( setup->slopSelect[15] >=0 )
   {
     fprintf(myInfo->fpLog,"use filtered data (flag=%d)\n",setup->slopSelect[15]);
   }
+  fclose(myInfo->fpSq1);
 
   // myInfo->bufsize is in byte, including CHKSUM
   frameSize=myInfo->bufSize/4;

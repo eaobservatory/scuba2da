@@ -59,6 +59,9 @@
  * 
  *
  *  $Log: sc2da.c,v $
+ *  Revision 1.99  2013/09/20 02:22:24  ryanb
+ *  fixes for kick/abort sequence
+ *
  *  Revision 1.98  2013/05/22 20:16:43  ryanb
  *  alternate ABORTACTION handling attempt
  *
@@ -2864,7 +2867,8 @@ StatusType *status
                sc2dalib_stopFrame(con,&dasInfo,&glbMceInx,dateTime,status);  
   
              sc2dalib_seqEnd(con,&dasInfo,lookupTable,status);
-             MsgOut(status,"sc2da_seq: seq ended"); 
+             MsgOut(status,"sc2da_seq: seq ended");
+             return;
           }
         }
         break;
@@ -2880,7 +2884,7 @@ StatusType *status
 	    post_sem(con->intask_sem,0);
 
 	    /* Now lie to ourselves in case dhtask gives FRAME_COMPLETION */
-	    dataDone = 1;
+	    /*dataDone = 1; set by FRAME trigger*/
 	    dasInfo.headersDone = 1;
 	    dasInfo.ithseqWait = (int)seqEnd;
 
@@ -4278,7 +4282,7 @@ StatusType *status
   {
     strcpy(dasInfo.logfileName,dasInfo.logFile);
     strcat(dasInfo.logfileName,dasInfo.Date);
-    dasInfo.fpLog=NULL;
+    my_fclose(&(dasInfo.fpLog));
     if ((dasInfo.fpLog = fopen64(dasInfo.logfileName,"a")) == NULL)
     {
       *status = DITS__APP_ERROR;
@@ -4291,9 +4295,7 @@ StatusType *status
     myFpLog = dasInfo.fpLog;
 
     dasInfo.glbCount=0;
-    if(dasInfo.fpLog)
-      fclose(dasInfo.fpLog);
-    dasInfo.fpLog=NULL;
+    my_fclose(&(dasInfo.fpLog));
   }
   jitDebug(4,"mceFindDate: the action has completed, the logfileName=%s\n",
             dasInfo.logfileName );
