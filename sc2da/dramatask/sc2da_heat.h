@@ -1,17 +1,9 @@
 #ifndef HEADGEN____sc2da_heat_h
 #define HEADGEN____sc2da_heat_h 
 
-#include "sc2da_par.h"
-#include "sc2da_struct.h"
-#include "sc2math.h"   // for sc2math-linfit
-#include "sc2headman.h"
-#include "math.h"      // for pow
-#include "jitXML.h"
-#include "sc2sqopt_par.h"
-#include "sc2sqopt.h"
-#include "star/atl.h"
+#include "sc2da_inc.h"
+#include "sc2da.h"
 #include "sc2dalib.h"
-#include "sc2headman.h"
 #include "sc2dalibsetup.h"
 
 /*+ heat_init_bias

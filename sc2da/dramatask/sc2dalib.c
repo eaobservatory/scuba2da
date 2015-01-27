@@ -102,19 +102,11 @@
 #include "sc2sqopt.h"
 #include "star/atl.h"
 
-static int  stripchFlag;
 static char engMode[10];
-static long qlFileCounter;  
-static int stairCounter;
-static int totalStairCount;
 
 //#define SAVE_ENG_DATA
-// #define  PRINT_LOG_MESG
 #define LOG_TRKHEAT_PIXEL
 #define LOG_TRKSQ2FB
-
-
-//#define NOTUSE_MCE   // test when no MCE is connected
   
 //------------ List of PCI CHECK ------------------------
 //-------------------------------------------------------
@@ -146,53 +138,6 @@ static MCE_CARD_DEF  mcecardStrt[]=
 
 #define MCE_CARD_NO (int)( sizeof(mcecardStrt)/sizeof(MCE_CARD_DEF) )
 
-// =======my_
-//====================//
-
-/**
- * my_fclose
- * Checks if file is closed, should be used before fopen
- * Stat: used 25 times
- */
-/*+ my_fclose
-*/
-void my_fclose(FILE **fp)
-{
-  if(fp == NULL || *fp == NULL)
-    {
-      return;
-    }
-  fclose(*fp);
-  *fp = NULL;
-}
-
-
-/**
- * my_closeFiles
- * Closes myInfo-> (fpData, fpMcecmd, fpBatch, Strchart, fpOtheruse)
- *  Flushes log file.
- *  Stat: used 2 times
- */
-/*+ my_closeFiles
-*/
-void my_closeFiles(dasInfoStruct_t *myInfo)
-{
-  fflush(myInfo->fpLog);
-  my_fclose(&(myInfo->fpData));
-  jitDebug(2,"my_closeFiles: closed fpData\n"); 
-
-  my_fclose(&(myInfo->fpMcecmd));
-  jitDebug(2,"my_closeFiles: closed fpMcecmd\n"); 
-
-  my_fclose(&(myInfo->fpBatch));
-  jitDebug(2,"my_closeFiles: closed fpBatch\n"); 
-
-  my_fclose(&(myInfo->fpStrchart));
-  jitDebug(2,"my_closeFiles: closed fpStrchart\n"); 
-
-  my_fclose(&(myInfo->fpOtheruse));
-  jitDebug(2,"my_closeFiles: closed fpOtheruse\n"); 
-}
 
 // =======sc2dalib_a*******
 //====================//
@@ -227,177 +172,7 @@ StatusType      *status
     return;
   }
   sc2dalib_endAction(con,myInfo,status);
-  my_closeFiles(myInfo);
-}
-
-
-/**
- * \fn void sc2dalib_allctsharedMem(SDSU_CONTEXT *con, 
- * dasInfoStruct_t *myInfo,  int startSeq, int endSeq, StatusType *status)
- *
- * \brief founction
- *  allocate share memory for information between drama 
- *  task and data handle task
- *
- * \param con      SDSU_CONTEXT structure pointer 
- * \param myInfo   dasInfoStruct_t pointer
- * \param startSeq  start Sequence Num
- * \param endSeq    end Sequence Num
- * \param status    StatusType.  given and return
- *
- *  // the whole shared memory looks like 
- * //  
- * // |  int        ithqlrecord |
- * // |-------------------------|
- * // |  qlNum*       QL struct |
- * // |               ......... |
- * // |               QL struct |
- * // |-------------------------|
- * // |  qlNum* int   lkupflage |
- * // |               ........  |   
- * // |               lkupflag  |
- * // |-------------------------|
- * // |  myInfo->numFrame *  sc2head struct |
- * // |                     ............... |
- * // |                     sc2head struct  |
- * // |-------------------------------------|
- * // in SCAN mode, the QL_STRUCT is different
- *
- */
-/*+ sc2dalib_allctsharedMem   
- */
-void sc2dalib_allctsharedMem
-(
-SDSU_CONTEXT       *con,         
-dasInfoStruct_t    *myInfo,
-int                startSeq,
-int                endSeq,
-StatusType         *status
-)
-{
-  int     i, *lkupPtr;
-  int     sharememSize=0;
-  int     *scannumPtr;
-  int     obsMode;
-  double  *timePtr;  
-  char    *scanfileName;
-  QL_SCAN *scanPtr; 
-  int     X,Y;
-
-  if (!StatusOkP(status)) return;
-
-  myInfo->numFrame=(endSeq-startSeq+1);
-  obsMode=myInfo->parshmPtr->obsMode;
-
-  myInfo->qlNum=myInfo->numFrame/myInfo->procNum;
-  // in case we have no-integer number of procNum
-  // for DREAM, the qlNum may not be right,(it is maximum, as default SMU_PATTERN=64)
-  // need to re-calculated after reading weightsfile in DH-task
-  if ( (myInfo->numFrame - myInfo->qlNum*myInfo->procNum) >0 )
-    myInfo->qlNum++;
-  
-  myInfo->parshmPtr->qlNum=myInfo->qlNum;
-
-  jitDebug(2,"sc2dalib_allctsharedMem: numfram(%d),procNum(%d), qlNum(%d)\n",
-            myInfo->numFrame, myInfo->procNum, myInfo->qlNum);
-
-  sharememSize = sizeof(int); // which QL is updated
-
-  if ( obsMode==OBS_STARE )
-   sharememSize += sizeof(QL_STRUCT)*myInfo->qlNum; 
-  else if ( obsMode==OBS_DREAM )
-   sharememSize += sizeof(RECONSTR_STRUCT)*myInfo->qlNum; 
-  else if ( myInfo->parshmPtr->obsMode ==OBS_SCAN )
-    sharememSize += sizeof(QL_SCAN)*myInfo->qlNum;   
-
-  sharememSize += sizeof(JCMTState)*myInfo->numFrame;  // for all sc2head
-  sharememSize += sizeof(int)*myInfo->qlNum;      // for all lookupflag table 
-  
-  jitDebug(2, "sc2da_seq: sizeof(JCMTState)= %d bytes, required sharedMem = %d MBs",
-              sizeof(JCMTState),sharememSize/(1024*1024));
- 
-  sc2dalib_setsharedMem(con,myInfo,SHAREDM_OBS,sharememSize,status); 
-  if (!StatusOkP(status)) 
-     return;  
-
-  myInfo->qlPtr=(int*)myInfo->sharedShm;
-
-  if ( obsMode==OBS_STARE ) 
-  {
-    if(SC2STORE__COL_INDEX == 0)
-      {
-	X = COL_NUM;
-	Y = ROW_NUM-1;
-      }
-    else
-      {
-	X = ROW_NUM-1;
-	Y = COL_NUM;
-      }
-
-    int s1=sizeof(QL_STRUCT);
-    int s2=sizeof(QL_IMAGE); 
-
-    jitDebug(2,"  sizeof(double)(%d) doube[Y*X] (%d) \n",
-            sizeof(double), sizeof(double)*X*Y); 
-    jitDebug(2," sizeof(QL) (%d) sizeof(IMAGE) (%d) \n",s1,s2 ); 
-
-    myInfo->sharemqlPtr=(QL_STRUCT *)(myInfo->qlPtr+1);
-    myInfo->lkupflagentPtr= (int *)(myInfo->sharemqlPtr + myInfo->qlNum);   
-  }
-  else if ( obsMode==OBS_DREAM ) 
-  {
-    if(SC2STORE__COL_INDEX == 0)
-      {
-	X = COL_NUM+4;
-	Y = ROW_NUM-1+4;
-      }
-    else
-      {
-	X = ROW_NUM-1+4;
-	Y = COL_NUM+4;
-      }
-   
-    int s1=sizeof(RECONSTR_STRUCT);
-    int s2=sizeof(RECONSTR_IMAGE); 
-
-    jitDebug(2,"  sizeof(double)(%d) doube[Y*X] (%d) \n",
-            sizeof(double), sizeof(double)*X*Y); 
-    jitDebug(2," sizeof(RESCONSTR) (%d) sizeof(IMAGE) (%d) \n",s1,s2 ); 
-
-    //ithqlPtr+1: skip the qlrecord 
-    myInfo->sharemrecnstrPtr=(RECONSTR_STRUCT *)(myInfo->qlPtr+1);
-    myInfo->lkupflagentPtr= (int *)(myInfo->sharemrecnstrPtr + myInfo->qlNum);  
-  }  
-  else if (obsMode==OBS_SCAN) 
-  {
-    myInfo->sharemscanPtr=(QL_SCAN *)(myInfo->qlPtr+1);
-    myInfo->lkupflagentPtr= (int *)(myInfo->sharemscanPtr +myInfo->qlNum);
-
-    // initialised scanName=NULL, lkupflag=0
-    for (i=0; i<myInfo->qlNum; i++)
-    {
-      scanPtr=myInfo->sharemscanPtr+i;
-      scannumPtr = (int *)scanPtr;
-      timePtr =(double *)(scannumPtr+1);
-      scanfileName=(char*) (timePtr+1);
-      strcpy(scanfileName,"NULL\n");
-    }
-  }
-  else
-  {
-    *status=DITS__APP_ERROR;  
-    ErsRep(0,status, "sc2dalib_allctsharedMem: don't know how to do for this OBSMODE");
-    return;
-  }
-  // move qlNum away  
-  myInfo->jcmtheadEntry=(JCMTState *)(myInfo->lkupflagentPtr + myInfo->qlNum); 
-
-  for (i=0; i<myInfo->qlNum; i++)
-  {
-    lkupPtr=myInfo->lkupflagentPtr +i;
-    *lkupPtr=0;
-  }
+  utils_close_files(myInfo);
 }
 
 
@@ -435,7 +210,7 @@ StatusType            *status
   if (*status != STATUS__OK) return;
 
   // Update debug flag, in case it has changed 
-  sc2dalib_updateDebug(con,myInfo, status);
+  utils_update_debug(con,myInfo, status);
 
   // Do not continue if not initialized or in a data taking mode 
   SdpGeti("INITIALISED", &initialised, status);
@@ -455,19 +230,16 @@ StatusType            *status
   }
   myInfo->actionFlag=BATCHACTION;
   argId = ( SdsIdType)DitsGetArgument();
-  jitArgGetS(argId,
-           "BATCH_FILE",1,NULL,"batch.txt",0, FILE_LEN,myInfo->batchFile,
-           NULL,status );
-  jitArgGetS(argId,
-           "DATA_FILE",2,NULL,"data.txt",0, FILE_LEN,myInfo->dataFile,
-           NULL,status );
-  jitArgGetS(argId,
-           "CMDREP_FILE",3,NULL,"cmdrep.txt",0, FILE_LEN,myInfo->cmdrepFile,
-           NULL,status );
-  jitArgGetI( argId, "SVFILE_FLAG", 4, range, 2, 0, &myInfo->filesvFlag,
-           status );
-  jitArgGetI( argId, "BATCH_DELAY", 5, range, 0, 0, &batchDelay,
-           status );
+  jitArgGetS(argId,"BATCH_FILE",1,NULL,"batch.txt",0,
+	     FILE_LEN,myInfo->batchFile,NULL,status );
+  jitArgGetS(argId,"DATA_FILE",2,NULL,"data.txt",0,
+	     FILE_LEN,myInfo->dataFile,NULL,status );
+  jitArgGetS(argId,"CMDREP_FILE",3,NULL,"cmdrep.txt",0,
+	     FILE_LEN,myInfo->cmdrepFile,NULL,status );
+  jitArgGetI(argId, "SVFILE_FLAG", 4, range, 2, 0, &myInfo->filesvFlag,
+	     status );
+  jitArgGetI(argId, "BATCH_DELAY", 5, range, 0, 0, &batchDelay,
+	     status );
   if ( !StatusOkP(status) )
   {
     ErsOut(0,status, 
@@ -476,10 +248,10 @@ StatusType            *status
   }
   SdpPuti("BATCH_DELAY",batchDelay,status);
 
-  sc2dalib_openFiles(myInfo,DATFILEAPPEND,BATCHFILE,status);
+  utils_open_files(myInfo,DATFILEAPPEND,BATCHFILE,status);
   if ( !StatusOkP(status) )
   {
-    ErsRep(0,status,"sc2dalib_batchInit: sc2dalib_openFiles failed.");
+    ErsRep(0,status,"sc2dalib_batchInit: utils_open_files failed.");
     return;
   }  
   fprintf(myInfo->fpLog,"\n<%s> CMD for sc2dalib__Batch (%s)\n",
@@ -572,10 +344,11 @@ StatusType            *status
                           mycmdInfo->cmdBuf,status);
         if ( *status ==DITS__APP_ERROR)
         {
-          sc2dalib_msgprintSave(myInfo,
-           "sc2dalib_batchParser: failed to call mcexml_translate","",USE_ERSREP,status);
-          sc2dalib_msgprintSave(myInfo,
-            "sc2dalib_batchParser: the cmd is <%s>",mycmdInfo->mceCmd,USE_ERSREP,status);
+          utils_msg(myInfo,
+                    "sc2dalib_batchParser: failed to call mcexml_translate",
+                    "",USE_ERSREP,status);
+          utils_msg(myInfo, "sc2dalib_batchParser: the cmd is <%s>",
+                    mycmdInfo->mceCmd, USE_ERSREP, status);
           myInfo->batchFlag=BATCH_TRANSFAIL;
           return;
         }
@@ -595,7 +368,7 @@ StatusType            *status
             sc2dalibsetup_whichRC(myInfo,token,status);
             if ( *status ==DITS__APP_ERROR)
             {
-              sc2dalib_msgprintSave(myInfo,
+              utils_msg(myInfo,
                  "sc2dalib_batchParser:  not recognised(%s) as MCE_WHICHCARD",
                   mycmdInfo->mceCmd,USE_ERSREP,status);
               myInfo->batchFlag=BATCH_TRANSFAIL;
@@ -627,12 +400,12 @@ StatusType            *status
               jitDebug(2,"sc2dalib_batchParser: the %ldth command= %s\n", 
                     myInfo->trkNo,mycmdInfo->mceCmd);
  
-              sc2dalib_Cmd(con,myInfo,mycmdInfo,dateTime,status);
+              mce_cmd(con,myInfo,mycmdInfo,dateTime,status);
               if (*status != STATUS__OK)
               {
                 myInfo->batchFlag=BATCH_CMDFAIL;
-                sc2dalib_msgprintSave(myInfo,
-                 "sc2dalib_batchParser: failed to call sc2dalib_Cmd","",
+                utils_msg(myInfo,
+                 "sc2dalib_batchParser: failed to call mce_cmd","",
                  USE_ERSREP,status);
                 return;
               }
@@ -699,23 +472,23 @@ StatusType     *status
 
     MsgOut(status,
       "\nsc2dalib_callbkdrvMsg:========= SDSU_DRIVER INFORMATION ===========");
-    sc2dalib_msgprintSave(argptr->myInfo,
+    utils_msg(argptr->myInfo,
        "==============driver ERROR ========================","",USE_PRINT, status);    
     if( drvuserMsg.action ==ERR_RESTART)
     {
-      sc2dalib_msgprintSave(argptr->myInfo,"  %s",drvuserMsg.error,USE_MSGOUT, status);
-      sc2dalib_msgprintSave(argptr->myInfo,"  %s",drvuserMsg.msg,USE_MSGOUT,status);
+      utils_msg(argptr->myInfo,"  %s",drvuserMsg.error,USE_MSGOUT, status);
+      utils_msg(argptr->myInfo,"  %s",drvuserMsg.msg,USE_MSGOUT,status);
     }
     else
     {
-      sc2dalib_msgprintSave(argptr->myInfo," %s",drvuserMsg.error,USE_MSGOUT, status);
-      sc2dalib_msgprintSave(argptr->myInfo," %s",drvuserMsg.msg,USE_MSGOUT, status);
-      sc2dalib_msgprintSave(argptr->myInfo," %s",drvErrors[drvuserMsg.action],
+      utils_msg(argptr->myInfo," %s",drvuserMsg.error,USE_MSGOUT, status);
+      utils_msg(argptr->myInfo," %s",drvuserMsg.msg,USE_MSGOUT, status);
+      utils_msg(argptr->myInfo," %s",drvErrors[drvuserMsg.action],
                         USE_MSGOUT,status);
     }
     if( drvuserMsg.action >=ERR_SEMTMO)
     {
-      sc2dalib_msgprintSave(argptr->myInfo,
+      utils_msg(argptr->myInfo,
          "Fibre link down, or partial packets received","",USE_MSGOUT,status);
     }
   }
@@ -802,83 +575,6 @@ StatusType   *status
     } 
   }
 }
-
-/**
- * \fn void sc2dalib_closesharedMem(dasInfoStruct_t *myInfo,
- *   int whichShared, StatusType *status)
- *
- * \brief founction
- *  close the shared memory (QL) used for drama task and data handle task
- *
- * \param myInfo       dasInfoStruct_t pointer
- * \param whichShared  int 
- * \param status       StatusType. pointer  given and return
- *
- */
-/*+ sc2dalib_closesharedMem   
- */
-void sc2dalib_closesharedMem
-(
-dasInfoStruct_t    *myInfo,
-int                whichShared,
-StatusType         *status
-)
-{
-  int   sharedmId;
-  char *sharedmPtr;
-
-  struct shmid_ds     stShmId;
-
-  if (*status != STATUS__OK) return;
-  
-  if ( whichShared==SHAREDM_PAR)
-    sharedmPtr=myInfo->parShm;
-  else
-    sharedmPtr=myInfo->sharedShm;
-  errno=0;
-  // check if the shared memory  segment attached to process.
-  if (sharedmPtr != (char *) -1)
-  {
-    if( shmdt(sharedmPtr)==-1)
-    {
-      *status = DITS__APP_ERROR;
-      if ( whichShared==SHAREDM_PAR)
-      {
-        ErsRep (0, status,"sc2dalib_closesharedMem: (PAR)shmdt %s",
-                strerror(errno));
-      }
-      else
-      {
-        ErsRep (0, status,"sc2dalib_closesharedMem: (OBS)shmdt %s",
-                strerror(errno));
-      }
-      return;
-    }
-  }
-
-  // check if the shared memory segment exists.
-  if ( whichShared==SHAREDM_PAR)
-    sharedmId=myInfo->sharedmparId;
-  else
-    sharedmId=myInfo->sharedmId;
-
-  errno=0;
-  if ( sharedmId >0 )
-  {
-    if (shmctl(sharedmId, IPC_RMID, &stShmId))
-    {
-      *status = DITS__APP_ERROR;
-      if ( whichShared==SHAREDM_PAR)
-        ErsRep (0, status,"sc2dalib_closesharedMem: (PAR)shmctl %s",
-                strerror(errno));
-      else
-        ErsRep (0, status,"sc2dalib_closesharedMem: (OBS)shmctl %s",
-                strerror(errno));
-      return;
-    }
-  }
-}
-
 
 
 /**
@@ -1010,210 +706,6 @@ StatusType            *status
   else if (inx == setup->slopSelect[2] )
   {
      inx=0; stepUPDW=0; insertInx=0;
-  }
-}
-
-
-/**
- * \fn void sc2dalib_Cmd(SDSU_CONTEXT *con, dasInfoStruct_t *myInfo,
- *  dasCmdInfo_t *mycmdInfo, char *dateTime,StatusType *status)
- *
- * \brief function
- *  send a cmd to MCE
- *
- * \param con        SDSU context structure pointer 
- * \param myInfo    dasInfoStruct_t pointer
- * \param mycmdInfo  dasCmdInfo_t pointer
- * \param dateTime   dateTime string pointer         
- * \param status     StatusType.  given and return
- *
- * send the command buffer to MCE
- * save the command buffer and reply or error in logfile 
- *
- */
-/*+ sc2dalib_Cmd 
- */
-void sc2dalib_Cmd
-(
-SDSU_CONTEXT      *con,
-dasInfoStruct_t   *myInfo,
-dasCmdInfo_t      *mycmdInfo,
-char              *dateTime,
-StatusType        *status
-)
-{
-  char   *byte;
-  int   *longword;
-  
-  if (!StatusOkP(status)) return;
-  
-  // initial reply as non-reply
-  mycmdInfo->reply.status=MCE_NONREPLY;
-  longword = (int *)mycmdInfo->cmdBuf;
-  byte=(char*)&mycmdInfo->reply;
-  myInfo->glbCount++;
-
-
-  /* In this case we have been building an AST keymap, but have reached the end 
-     of the file so we just want to write the key map out and end */
-  if ((myInfo->filesvFlag == 5) && (myInfo->astMapState == 2))
-    {
-      sc2dalib_saveMceRepToHash(myInfo,myInfo->fpMcecmd,mycmdInfo->replySize,
-				byte,mycmdInfo->mceCmd);
-      return;
-    }
-  
-
-#ifdef PRINT_LOG_MESG
-  if (myInfo->actionFlag == MCESTATUSACTION || myInfo->actionFlag == SERVOACTION)
-  {
-    fprintf(myInfo->fpLog,"\nCMD(%ld): <%s> sent to the MCE\n",
-          myInfo->glbCount,mycmdInfo->mceCmd);
-  }
-  else
-  {
-    fprintf(myInfo->fpLog,"\n<%s>CMD(%ld): <%s> sent to the MCE\n",
-          dateTime,myInfo->glbCount,mycmdInfo->mceCmd);
-  }
-#endif
-
-  if (myInfo->filesvFlag == 1 )
-  {
-    if (myInfo->actionFlag == MCESTATUSACTION)
-    {
-      fprintf(myInfo->fpMcecmd, "<%s> ",mycmdInfo->mceCmd);
-    }
-    else
-    {
-      // also save into the specified file, 
-      fprintf(myInfo->fpMcecmd,"\n<%s>CMD(%d): <%s> sent to MCE \n",
-            dateTime,myInfo->trkNo,mycmdInfo->mceCmd);
-    }
-  }
-
-  // return SDSU_OK if WBOK RBOK GOOK, STOK or RSOK
-  // or errNo for new protocol
-  *status=sdsu_command_mce (con,mycmdInfo->cmdBuf,&mycmdInfo->reply);
-
-  // save cmd and reply first, then check *status, so that we have checksum saved 
-  // don't save cmd buffer to the logfile if it is a batch or
-  // servo cmd or track heat action
-  if( con->process.framesetup != DA_MCE_SINGLEDATA)
-  { 
-#ifdef PRINT_LOG_MESG
-    if ( myInfo->actionFlag !=MCESTATUSACTION && 
-        myInfo->actionFlag !=SERVOACTION )
-      sc2dalib_savecmdBuf(myInfo->fpLog,mycmdInfo->cmdBufSize,mycmdInfo->cmdBuf);
-#endif
-    if (myInfo->filesvFlag==1 && myInfo->actionFlag !=MCESTATUSACTION)
-      sc2dalib_savecmdBuf(myInfo->fpMcecmd,mycmdInfo->cmdBufSize,
-                      mycmdInfo->cmdBuf);
-  }
-  mycmdInfo->replySize=con->packsize;
-#ifdef PRINT_LOG_MESG
-  sc2dalib_savemceReply(myInfo->fpLog,mycmdInfo->replySize, 
-                                    byte,myInfo->glbCount);
-#endif
-  if (myInfo->filesvFlag == 1)
-  {
-    if ( myInfo->actionFlag != MCESTATUSACTION )
-      sc2dalib_savemceReply(myInfo->fpMcecmd,mycmdInfo->replySize,byte,
-                                      myInfo->trkNo);
-    else
-      sc2dalib_savemcerepData(myInfo,myInfo->fpMcecmd,mycmdInfo->replySize,byte);
-  }
-  else  if (myInfo->filesvFlag == 5)
-    {
-      sc2dalib_saveMceRepToHash(myInfo,myInfo->fpMcecmd,mycmdInfo->replySize,
-				byte,mycmdInfo->mceCmd);
-    }
-  
-  if( *status !=SDSU_OK)
-  { 
-    *status=DITS__APP_ERROR;
-    if (con->flag.protoCOL==OLDPROTO)
-      sc2dalib_mceerrRep(myInfo,mycmdInfo,status); 
-    else
-      // need to decide if it is fatal or non fatal error
-      sc2dalib_mceerrnewRep(myInfo,mycmdInfo,status); 
-    return;
-  }
-
-}
-
-
-/**
- * \fn void sc2dalib_chkChecksum(dasInfoStruct_t *myInfo,
- *      dasCmdInfo_t *mycmdInfo,   StatusType *status)
- *
- * \brief function
- *  check reply checksum and report it
- *
- * \param   myInfo    dasInfoStruct_t structure pointer
- * \param  mycmdInfo  dasCmdInfo_t structure pointer
- * \param  status     StatusType.  given and return
- *
- */
-/*+ sc2dalib_chkChecksum 
-*/
-void sc2dalib_chkChecksum
-(
-dasInfoStruct_t  *myInfo,   
-dasCmdInfo_t     *mycmdInfo,
-StatusType       *status
-)
-{
-  int         chksum=0,chksumRec;
-  int         chksumNo,j;
-  static char chksumerr[FILE_LEN];
- 
-  if (!StatusOkP(status)) return;
-
-  // my reply struct has total 64 words
-  //{ uint32  status  ;    //<cmd and status, i.e "WMOK" or "WMER" or errNo for NEW PROTOCOL 
-  //  uint32  data[62];    //< Data argument 
-  //  uint32  checksum;    //< word64 checksum 
-  //}
-  //
-  // MCE's reply is (old protocol) 
-  // { status; 
-  //   cardId+parId;
-  //   58 data (max);
-  //   chksum
-  // }
-  // mycmdInfo->replySize <=61
-  // ( 1(status) + 1(cardId+parId) + 58(No_data) + 1(chksum) )
-  //
-  // MCE's reply is (new protocol) 
-  // {  errno; 
-  //   cardId+parId;
-  //   58 data (max);
-  //   chksum
-  // }
-  // mycmdInfo->replySize <=61
-  // ( 1(errno) + 1(cardId+parId) +58(No_data) + 1(chksum) )
-  //
-  // hence, it never fills the reply structure upto reply.checksum
-
-  chksumNo=mycmdInfo->replySize - 2;
-  chksum ^= mycmdInfo->reply.status;
-
-  for (j=0;j<chksumNo;j++)     
-    chksum ^=mycmdInfo->reply.data[j];
-
-  // checksum from MCE is alway in reply.data[] 
-  chksumRec=mycmdInfo->reply.data[chksumNo];
-  jitDebug(2,
-       "sc2dalib_chkChecksum: RTL's CHECKSUM <%08X>, MCE's CHECKSUM  <%08X>\n",
-       chksum,chksumRec);
-
-  if( chksumRec !=chksum)
-  {
-    sprintf(chksumerr,
-           "the calculated chksum(%#X)!=mcechksum(%#X)", chksum,chksumRec);
-    sc2dalib_msgprintSave(myInfo,
-           " sc2dalib_chkChecksum: %s",chksumerr,USE_ERSOUT,status);   
-    *status=DITS__APP_ERROR;
   }
 }
 
@@ -1403,7 +895,7 @@ StatusType            *status
   if (*status != STATUS__OK) return;
   
   // Update debug flag, in case it has changed 
-  sc2dalib_updateDebug(con,myInfo, status);
+  utils_update_debug(con,myInfo, status);
 
   // Do not continue if not initialized or in a data taking mode 
   SdpGeti("INITIALISED", &initialised, status);
@@ -1454,10 +946,10 @@ StatusType            *status
   }
 
   // read the current heater setting and store as the nominal
-  sc2dalib_readmceVal(con, myInfo, mceInxpt, heatVal, &myInfo->nominalPixelHeat,1, status);
+  mce_read(con, myInfo, mceInxpt, heatVal, &myInfo->nominalPixelHeat,1, status);
   if (!StatusOkP(status)) 
     {
-      ErsRep(0,status, "sc2dalib_configInit: sc2dalib_readmceVal failed to read heater value"); 
+      ErsRep(0,status, "sc2dalib_configInit: mce_read failed to read heater value"); 
       return;
     }
 
@@ -1680,7 +1172,7 @@ StatusType            *status
   fclose(tmpFp);
 
   jitDebug(2,"sc2dalib_configInitSet: calling createQLDS\n"); 
-  sc2dalib_createQLSDS(myInfo, status );
+  utils_create_QLSDS(myInfo, status );
   if ( !StatusOkP(status) )
     return;
 
@@ -1693,355 +1185,6 @@ StatusType            *status
   SdpPuti("IN_SEQUENCE",DA_MCE_NONE,status);
   SdpPuti("CONFIGURED", 1, status);
 }
-
-
-
-/**
- * \fn void sc2dalib_createSDP(dasInfoStruct_t  *myInfo, StatusType *status)
- *
- * \brief functaion
- *  create parameter SDP struct to store local info used by this task.
- *
- * \param myInfo  dasInfoStruct_t pointer
- * \param status   StatusType pointer.  given and return
- *
- */
-/*+ sc2dalib_createSDP
- */
-void sc2dalib_createSDP
-(
-dasInfoStruct_t  *myInfo,
-StatusType       *status
-)
-{   
-  int   allzeros=0;
-  char  noname[]=" ";
-
-  //have to be static
-  static long           zero=0;
-  static double         dzero=0.0;  
-
-  
-  if (!StatusOkP(status)) return;
-
-  // parameter supported by this task 
-  static SdpParDefType  daParDefs[]=
-  {
-   { "STATE", &zero,  SDS_STRUCT  },
-   { "CONFIGURE_ID", &zero,  SDS_INT  },
-   { "SETUP_SEQ_ID", &zero,  SDS_INT  },
-   { "SEQUENCE_ID", &zero,  SDS_INT  },
-   { "TAI", &dzero,  SDS_DOUBLE  },
-   { "INITIALISED", &zero, SDS_INT},
-   { "CONFIGURED", &zero, SDS_INT},
-   { "SETUP", &zero, SDS_INT},
-   { "IN_SEQUENCE", &zero, SDS_INT},
-   { "SEQ_START", &zero, SDS_INT},
-   { "SEQ_END", &zero, SDS_INT},
-   { "SEQ_DWELL", &zero, SDS_INT},
-   { "FRAME_RATE", &zero, SDS_INT},
-   { "BATCH_DELAY", &zero, SDS_INT},
-   { "QL", &zero, SDS_STRUCT},
-   { "DATA_FILE", "A long filename", ARG_STRING},
-   { "FRAME_NO2PROC", &zero, SDS_INT},
-   { "FRAME_TOTALNO", &zero, SDS_INT},
-   { "FRAME_BUFSIZE", &zero, SDS_INT},
-   { "ARRAY_CNNTED", "array name", ARG_STRING}, 
-   { "WAVELENGTH", "850", ARG_STRING}, 
-   { "OBS_NO", &zero, SDS_INT},
-   { "SUBSCAN_NO", &zero, SDS_INT},
-   { "DATE", "A long filename", ARG_STRING},
-   { "FRAME_FILENAME", "A long filename", ARG_STRING},
-   { "MCE_WHICHCARD", "A card name", ARG_STRING},
-   { "SHUTTER_STATUS", "UNKNOWN", ARG_STRING},
-   { "OBS_MODE", "DARK", SDP_STRING},
-   { "STAREADD", &zero, SDS_INT},
-   { "SCANWRITE", &zero, SDS_INT},
-   { "DREAMROUND", &zero, SDS_INT},
-   { "HTTRACK_FLAG", &zero, SDS_INT},
-   { "INITFLAGS", &zero, SDS_INT},
-   { SC2DALOGFILE, "A long filename", ARG_STRING},
-   { SC2DAMCEXMLFILE, "A long filename", ARG_STRING},
-   { SC2DADATAFORMAT, " format", ARG_STRING}
-  };
- 
-  myInfo->parsysId = (SdsIdType)DitsGetParId();
-  SdpCreate(myInfo->parsysId,DitsNumber(daParDefs), daParDefs, status);
-  if( *status != STATUS__OK)
-  {
-    printf("sc2dalib_createSDP: SdpCreate failed \n");
-    return;
-  }
-
-  // put all the parameters into the STATE structure */
-  SdpGetSds("STATE", &myInfo->statId, status);
-  if( *status != STATUS__OK)
-  {
-    printf("sc2dalib_createSDP:could not initialized STATE sds structure \n");
-    return;
-  }
-  ArgPuti(myInfo->statId, "NUMBER",allzeros, status);
-  ArgPuti(myInfo->statId, "SEQ_START",allzeros, status);
-  ArgPuti(myInfo->statId, "SEQ_END",allzeros,status);
-  ArgPuti(myInfo->statId, "SEQ_DWELL",allzeros,status);
-  ArgPuti(myInfo->statId, "FRAME_RATE",1,status);
-  ArgPuti(myInfo->statId, "BATCH_DELAY",0,status);
-  ArgPutString(myInfo->statId, "OBS_MODE",noname, status);
-  ArgPutString(myInfo->statId, "MCE_WHICHCARD",noname, status);
-  ArgPutString(myInfo->statId, "ARRAY_CNNTED",noname, status);
-  ArgPutString(myInfo->statId, "DATE",noname, status);
-  ArgPutString(myInfo->statId, "WAVELENGTH",noname, status);
-  ArgPuti(myInfo->statId, "OBS_NO",allzeros, status);
-  ArgPuti(myInfo->statId, "SUBSCAN_NO",allzeros, status);
-  ArgPuti(myInfo->statId, "STAREADD",200, status);
-  ArgPuti(myInfo->statId, "SCANWRITE",40000, status);
-  ArgPuti(myInfo->statId, "DREAMROUND",3, status);
-  // leave create QL SDS struct in configuration since it depends on 
-  // obs_mode
-
-
-}
-   
-
-/**
- * \fn void sc2dalib_createQLSDS(dasInfoStruct_t  *myInfo,
- *  StatusType *status)
- *
- * \brief functaion
- *  create QL parameter structure depending on obsmode 
- *
- * \param myInfo  dasInfoStruct_t pointer
- * \param status   StatusType pointer.  given and return
- *
- */
-/*+ sc2dalib_createQLSDS
- */
-void sc2dalib_createQLSDS
-(
-dasInfoStruct_t  *myInfo,
-StatusType       *status
-)
-{   
-  int   obsMode;
-  char  scanfile[]="                     ";
-  long tLong;
-  double tDouble;
-
-  if (*status != STATUS__OK) return;
-
-  /* Get the ID of the QL structure */
-
-  SdpGetSds("QL", &myInfo->qlId, status);
-  if( *status != STATUS__OK)
-  {
-    ErsRep(0,status,"sc2dalib_createQLSDS: SdpGetSds QL failed \n");
-    return;
-  }
-
-  /* Mark the QL structure as not containing valid data */
-  ArgPutString(myInfo->qlId,"DATAVALID", "NO", status);
-
-  // delete and free unsed sub sds data from qlId
-
-  sc2dalib_chksdsID(myInfo,status);
-  if( *status != STATUS__OK)
-    {
-      ErsRep(0,status,"sc2dalib_createQLSDS: sc2dalib_chksdsID failed \n");
-      return;
-    }
-
-  // Place the parameters that are shared into the QL structure 
-  tLong =  0;
-  ArgPuti(myInfo->qlId,"FRAMENUM", tLong, status);
-  SdsFind(myInfo->qlId,"FRAMENUM", &myInfo->seqId, status);
-  if( *status != STATUS__OK)
-  {
-    ErsRep(0,status,"sc2dalib_createQLSDS: ArgPuti (framenum) failed \n");
-    return;
-  } 
-  tDouble = 0.0;
-  ArgPutd(myInfo->qlId,"TIMESTAMP", tDouble, status);
-  SdsFind(myInfo->qlId,"TIMESTAMP", &myInfo->timeId, status);
-  if( *status != STATUS__OK)
-  {
-    ErsRep(0,status,"sc2dalib_createQLSDS: ArgPutd (timestamp) failed \n");
-    return;
-  } 
-
-  obsMode=myInfo->parshmPtr->obsMode;
-
-  /* The FILENAME is only used in OBS_SCAN */  
-  if( obsMode == OBS_SCAN )
-    {
-      ArgPutString(myInfo->qlId,"FILENAME",scanfile,status);
-      SdsFind(myInfo->qlId,"FILENAME", &myInfo->filenameId, status);
-      if( *status != STATUS__OK)
-	{
-	  ErsRep(0,status,"sc2dalib_createQLSDS: argputstring (scanfile) failed");
-	  return;
-	}
-
-      qlFileCounter=1;
-
-    }
-  
-  else if( obsMode==OBS_STARE || obsMode==OBS_DREAM)
-    {
-      unsigned long  datadims[2];
-      unsigned long  fitsdims[2];
-
-      // Create a x*y array; y=datadims[0]=COL_NUM; x=datadims[1]=ROW_NUM-1;
-      if ( obsMode !=OBS_DREAM )
-	{
-	  datadims[SC2STORE__COL_INDEX] = COL_NUM; 
-	  datadims[SC2STORE__ROW_INDEX] = ROW_NUM-1;
-	}
-      else
-	{
-	  if(SC2STORE__COL_INDEX == 0)
-	    {
-	      datadims[0] = COL_NUM+4;
-	      datadims[1] = ROW_NUM-1+4;
-	    }
-	  else
-	    {
-	      datadims[0] = ROW_NUM-1+4;
-	      datadims[1] = COL_NUM+4;
-	    }
-	}
-   
-      // Both the data array and the FITS headers go in the structure called "IMAGE"
-
-      SdsNew(myInfo->qlId,"IMAGE", 0, NULL, SDS_STRUCT, 0, NULL, 
-	     &myInfo->imageId,status);
-      if( *status != STATUS__OK)
-	{
-	  ErsRep(0,status,"sc2dalib_createQLSDS: SdsNew (image) failed");
-	  return;
-	} 
-
-    // Stick the space for the FITS headers into IMAGE 
-      fitsdims[0] = FITSSIZE;
-      fitsdims[1] = MAXFITS;
-      SdsNew(myInfo->imageId, "FITS", 0, NULL, SDS_CHAR, 2, fitsdims, 
-	     &myInfo->fitsId,status);
-      if( *status != STATUS__OK)
-	{
-	  ErsRep(0,status,"sc2dalib_createQLSDS: SdsNew (fits) failed ");
-	  return;
-	}
-
-      // Stick the DATA_ARRAY into IMAGE
-      SdsNew(myInfo->imageId,"DATA_ARRAY", 0, NULL, SDS_DOUBLE, 2, datadims, 
-	     &myInfo->qldataId,status);
-      if( *status != STATUS__OK)
-	{
-	  ErsRep(0,status,"sc2dalib_createQLSDS: SdsNew (data-array)failed ");
-	  return;
-	}
-    }
-}  
-
-
-
-/**
- * \fn void sc2dalib_updateQLSDS(SDSU_CONTEXT *con, dasInfoStruct_t  *myInfo,
- * int *coaddnumPtr, double *timePtr, char  *fitsPtr, uint32 *fitsDim,
- * double *coadddataPtr, uint32 *dataDim, char  *scanfileName,
- *  StatusType *status)
- *
- * \brief functaion
- *  resize QL  structure depending on realdata 
- *
- * \param con          SDSU context structure pointer
- * \param myInfo      dasInfoStruct_t pointer
- * \param coaddnumPtr  int pointer for ith codd Number,
- * \param timePtr      double pointer for time
- * \param fitsPtr      char pointer for FITS 
- * \param fitsDim      uint32 pointer, fits dimension [0] size_n, [1] num_n
- * \param coadddataPtr  double pointer for coadd data entry,
- * \param dataDim      uint32 pointer,  data dimension [0] col_n, [1] row_n
- * \param scanfileName char pointer for scanfile name 
- * \param status   StatusType pointer.  given and return
- *
- */
-/*+ sc2dalib_updateQLSDS
- */
-void sc2dalib_updateQLSDS
-(
-SDSU_CONTEXT     *con,
-dasInfoStruct_t  *myInfo,
-int              *coaddnumPtr,
-double           *timePtr,
-char             *fitsPtr,
-uint32           *fitsDim,    // fits dimension [0] size_n, [1] num_n
-double           *coadddataPtr,
-uint32           *dataDim,      // data dimension [0] col_n, [1] row_n
-char             *scanfileName,
-StatusType       *status
-)
-{   
-  int   bufSize;
-  int   obsMode;
-  static char dummyFileName[FILE_LEN + 4];
-
-  if (*status != STATUS__OK) return;
-
-  obsMode=myInfo->parshmPtr->obsMode;
-
-  SdsPut(myInfo->timeId,sizeof(double),0,timePtr,status);
-  ArgPuti(myInfo->qlId,"OBSNUM", (long)myInfo->obsNo, status);
-  
-  if(obsMode==OBS_STARE || obsMode==OBS_DREAM)
-  {
-    if(myInfo->parshmPtr->load != LOAD_DARK)
-      {
-
-	// Put the QL frame number in FRAMENUM
-	SdsPut(myInfo->seqId, sizeof(int),0,coaddnumPtr,status);
-
-	// Create a dataDim[0]*[1] array within dasInfo.qlId + others 
-	bufSize=dataDim[0]*dataDim[1]*sizeof(double);
-	// update now
-	SdsResize(myInfo->fitsId,2,fitsDim,status);
-	SdsPut(myInfo->fitsId,fitsDim[0]*fitsDim[1],0,fitsPtr,status);
-	// the coaddaataPtr is the coadd frame   
-	SdsPut(myInfo->qldataId,bufSize,0,coadddataPtr,status);
-
-	/* Mark the QL structure as containing valid data
-	   and then update the QL structure */
-  
-	ArgPutString(myInfo->qlId,"DATAVALID", "YES", status);
-	SdpUpdate(myInfo->qlId,status);
-
-      }
-
-  }
-  else if( obsMode==OBS_SCAN )
-  {
-    /* Add .sdf to the end of the scanfileName */
-    strncpy(dummyFileName, scanfileName, FILE_LEN);
-    strcat(dummyFileName,".sdf");
-    ArgPutString(myInfo->qlId,"FILENAME",dummyFileName, status);
-
-    /* Log the filename to the log file */
-    fprintf(myInfo->fpLog,"sc2dalib_updateQLSDS: Putting this file name into the QL structure %s\n",dummyFileName);
-
-    /* Increment counter so it increments with each new file (and put in FRAMENUM)*/
-
-    ArgPuti(myInfo->qlId, "FRAMENUM", qlFileCounter, status);
-
-  /* Mark the QL structure as containing valid data
-     and then update the QL structure */
-  
-    ArgPutString(myInfo->qlId,"DATAVALID", "YES", status);
-    SdpUpdate(myInfo->qlId,status);
-
-    qlFileCounter++;
-
-  }
-}  
-
 
  
 /**
@@ -2196,149 +1339,7 @@ StatusType      *status
      MsgOut(status,"!!!!! sc2dadh died you must do an UNLOAD_INST - LOAD_INST cycle ");
      fprintf(myFpLog,"sc2dadh died you must do an UNLOAD_INST - LOAD_INST cycle ");
    }
-
 }
-
-
-/**
- * \fn void sc2dalib_dispResults(dasInfoStruct_t *myInfo, 
- *  dasCmdInfo_t *mycmdInfo,  StatusType *status)
- *
- * \brief functaion
- *  display reply from MCE 
- *
- * \param myInfo   dasInfoStruct_t structure pointer
- * \param mycmdInfo dasCmdInfo_t structure pointer 
- * \param status    StatusType.  given and return
- *
- */
-/*+ sc2dalib_dispResults - 
-*/
-void sc2dalib_dispResults
-(
-dasInfoStruct_t       *myInfo,   
-dasCmdInfo_t          *mycmdInfo, 
-StatusType            *status
-)
-{
-  int   dataNo,i,j;
-  int  multi,remain;
-  char  remainData[FILE_LEN], remainData1[FILE_LEN]="";
-  char  localmsg[FILE_LEN];
-  char  fwrevString[]="fw_rev";
-  char  heatString[]="bc1 bias";
-  char  biasString[]="bc2 bias";
-  char  arrayString[]="cc array_id";
-
-
-  if (!StatusOkP(status)) return;
-
-  sprintf(localmsg,"CardIdParam=%08lX Word3=%08lX",
-             mycmdInfo->reply.data[0],mycmdInfo->reply.data[1]);
-  if (mycmdInfo->reply.status == MCE_WBOK )
-    jitDebug(2,"WBOK %s\n",localmsg);  
-  else if (mycmdInfo->reply.status == MCE_GOOK )
-    jitDebug(2,"GOOK %s\n",localmsg);
-  else if (mycmdInfo->reply.status == MCE_STOK )
-    jitDebug(2,"STOK %s\n",localmsg);
-  else if (mycmdInfo->reply.status == MCE_RSOK )
-    jitDebug(2,"RSOK %s\n",localmsg);
-
-  // all error msgs have been displayed in sc2dalib_mceerrRep
-  // only use reply.data[]:1,.... 
-  // not include reply.status,data[0]=(cardId+ParaId) and chechsum
-  dataNo=mycmdInfo->replySize-3;  
-  jitDebug(2,"dataNO (%d) from RBOK)\n",dataNo);
- 
-  // firmware revision
-  if( (strstr(mycmdInfo->mceCmd,fwrevString)!=NULL) && 
-             (mycmdInfo->reply.status == MCE_RBOK) 
-    )  
-  {
-    int buildNo, minorNo, majorNo;
-    //print revision 
-    buildNo=(int)( (mycmdInfo->reply.data[1]    )&0x0000FFFF );
-    minorNo=(int)( (mycmdInfo->reply.data[1]>>16)&0x000000FF );
-    majorNo=(int)( (mycmdInfo->reply.data[1]>>24)&0x000000FF );
-    MsgOut(status,"%s => Revision %d .%d build %d", 
-	   mycmdInfo->mceCmd,majorNo,minorNo,buildNo);
-  }
-  else if( ( strstr(mycmdInfo->mceCmd,heatString)!= NULL ||
-             strstr(mycmdInfo->mceCmd,arrayString)!= NULL ||
-	     strstr(mycmdInfo->mceCmd,biasString)!= NULL ) && 
-                   (mycmdInfo->reply.status == MCE_RBOK) 
-         )  
-  {
-    sc2dalib_dispReply(mycmdInfo,1,status);
-  }
-  else if( ( myInfo->filesvFlag > 1) && ( myInfo->actionFlag==MCECMDACTION) && 
-           (mycmdInfo->reply.status == MCE_RBOK) 
-         )  
-  {
-    sc2dalib_dispReply(mycmdInfo,dataNo,status);
-  }
-   
-  if(myInfo->debuglvl==2)     
-  {
-    if(mycmdInfo->reply.status == MCE_RBOK )
-    {
-      multi=dataNo/8; remain=dataNo%8;
-      jitDebug(2,"Data from ReadBlock\n");
-      for (j=0;j<multi;j++)  
-      {
-        jitDebug(2,"  %8ld %8ld %8ld %8ld %8ld %8ld %8ld %8ld\n",
-         mycmdInfo->reply.data[j*8+1],mycmdInfo->reply.data[j*8+2],
-         mycmdInfo->reply.data[j*8+3],mycmdInfo->reply.data[j*8+4],
-         mycmdInfo->reply.data[j*8+5],mycmdInfo->reply.data[j*8+6],
-         mycmdInfo->reply.data[j*8+7],mycmdInfo->reply.data[j*8+8]);
-      }
-      if(remain)
-      {
-        for (i=1;i<=remain;i++)  
-        {
-          sprintf(remainData,"%s %8ld", remainData1,
-                   mycmdInfo->reply.data[j*8+i]);
-          strcpy(remainData1,remainData);
-        } 
-        jitDebug(2," %s\n", remainData);
-      }
-    }
-  }
-}
-
-
-/**
- * \fn void sc2dalib_dispReply(dasCmdInfo_t *mycmdInfo, int howMany,
- *  StatusType *status)
- *
- * \brief functaion
- *  display reply 
- *
- *\param mycmdInfo  dasCmdInfo_t structure pointer 
- *\param howMany    int
- *\param status     StatusType.  given and return
- */
-/*+ sc2dalib_dispReply - 
-*/
-void sc2dalib_dispReply
-(
-dasCmdInfo_t  *mycmdInfo,
-int           howMany, 
-StatusType    *status
-)
-{
-  int   i; 
-  char  msg[FILE_LEN],tmp[FILE_LEN]="";
- 
-  if (!StatusOkP(status)) return;
-  
-  for ( i=0; i<howMany; i++)
-  {
-    sprintf(msg,"%d ",(int)mycmdInfo->reply.data[i+1]);
-    strcat(tmp,msg);
-  }
-  MsgOut(status," %s",tmp);   
-}  
 
 
 /**
@@ -2372,16 +1373,15 @@ StatusType            *status
   if (*status != STATUS__OK) return;
 
   // Update debug flag, in case it has changed 
-  sc2dalib_updateDebug(con,myInfo, status);
+  utils_update_debug(con,myInfo, status);
 
   // Do not continue if not initialized or in a data taking mode 
   SdpGeti("IN_SEQUENCE", &in_sequence, status);
   if(in_sequence != DA_MCE_NONE)
   {
     *status = DITS__APP_ERROR;
-     ErsRep (0, status, 
-        "sc2dalib_downld2pciInit: %s has not completed",
-        seqStatus[myInfo->actionFlag]);
+     ErsRep (0, status, "sc2dalib_downld2pciInit: %s has not completed",
+	     seqStatus[myInfo->actionFlag]);
      return;
   }
   myInfo->actionFlag =DSPACTION;
@@ -2530,7 +1530,6 @@ StatusType *status
 
 // =======sc2dalib_e*******
 //====================//
-
 /**
  * \fn void sc2dalib_endAction(SDSU_CONTEXT *con, dasInfoStruct_t *myInfo, 
  *  StatusType *status)
@@ -2571,55 +1570,6 @@ StatusType      *status
 
 // =======sc2dalib_f*******
 //====================//
-
-/**
- * \fn int sc2dalib_finddateTime(short which, char *dateArray)
- *
- * \brief function
- *  get the time date in DayMonthYear:hour:minute:second 
- *  (DAS_DATETIME) or DayMonthYear (DAS_DATE)format and return 
- *
- * \param which     short: either date only or data and time
- * \param dateArray char pointer for the date string
- *
- * \retval 1: DAS_DATE 0: otherwise
- */
-
-/*+ int sc2dalib_finddateTime 
- */
-int sc2dalib_finddateTime
-(
-short         which,
-char          *dateArray
-)
-{
-  time_t tm;
-  struct tm *ptr;
-  char   date[40]="";  
-  char   day[10],month[10],year[10];
-  
-  tm = time(NULL);
-  ptr = localtime(&tm);
-  strftime(day,15,"%d",ptr); 
-  strftime(month,15,"%m",ptr); 
-  strftime(year,15,"%Y",ptr); 
-  strcat(date,year);         
-  strcat(date,month);          
-  strcat(date,day);
-
-  if(which==DAS_DATE)
-  {
-    strcpy(dateArray,date); return 1;
-  }
-  else
-  {
-    strncpy(date,asctime(ptr), (strlen(asctime(ptr))-1) );
-    strcpy(dateArray,date); 
-  }
-  return 0;
-}
-
-
 /**
  * \fn void sc2dalib_frametakeInit(SDSU_CONTEXT *con, dasInfoStruct_t *myInfo,
  *  int startSeq, int endSeq, struct mcexml_struct *mceInxpt, 
@@ -2651,9 +1601,7 @@ char                  *dateTime,
 StatusType            *status
 )
 {
-#ifndef NOTUSE_MCE
   dasCmdInfo_t frameCmd;
-#endif
   if (!StatusOkP(status)) return;
 
   errno=0;
@@ -2672,7 +1620,6 @@ StatusType            *status
   jitDebug(2,"sc2dalib_frametakeInit: dataCount(frameNum)=%d\n",
           myInfo->numFrame);
 
-#ifndef NOTUSE_MCE  
   sprintf(frameCmd.mceCmd, "WB cc ret_dat_s %d %d",startSeq, endSeq);
   // send cmd and get reply, save them to logfile donot save to other
   // cmdreply file specified by user
@@ -2694,9 +1641,8 @@ StatusType            *status
      return;
   }
   if( myInfo->debuglvl==2)
-    sc2dalib_dispResults(myInfo,&frameCmd,status);
-  con->process.reason=FRAME_WAITING;  
-#endif
+    mce_results(myInfo,&frameCmd,status);
+  con->process.reason=FRAME_WAITING;
 }
 
 /**
@@ -2784,10 +1730,10 @@ StatusType             *status
                                 mycmdInfo->cmdBuf, status);
   if ( *status ==DITS__APP_ERROR)
   {     
-    sc2dalib_msgprintSave(myInfo,
+    utils_msg(myInfo,
        "sc2dalib_getcmdBuf: Error- failed to  call mcexml_translate","",
        USE_ERSREP,status);
-    sc2dalib_msgprintSave(myInfo,
+    utils_msg(myInfo,
        "sc2dalib_getcmdBuf: the cmd is <%s>",mycmdInfo->mceCmd,USE_ERSREP,status);
     return ;
   }
@@ -2862,302 +1808,6 @@ StatusType *status
 //====================//
 
 /**
- * \fn void sc2dalib_initHeatBiasHandling(SDSU_CONTEXT *con,dasInfoStruct_t *myInfo, 
- *  int *flag, StatusType *status)
- *
- * \brief function
- *  Based on values of drcontrol and pixelHeat we are either going to do
- *  A standard SEQUENCE where the heater current is not changed, a slow
- *  fixed flat field where the current is set to a single fixed value, 
- *  a fast flat field where the heater is changed within the SEQUENCE, a
- *  heater ramp where the heater is changed within SEQUENCE, a bias sawtooth
- *  or TES bias ramp where the TES bias is changed within SEQUENCE 
- *
- *  Determine the style of SEQUENCE and handle the heater 
- *  current and TES Bias accordingly
- *
- * \param con          SDSU context structure
- * \param myInfo       dasInfo structure pointer
- * \param flag         False if nothing changes within sequence > 0 otherwise
- * \param status       StatusType     
- *
- */
-/*+ sc2dalib_initHeatBiasHandling
-*/
-void sc2dalib_initHeatBiasHandling
-(
-SDSU_CONTEXT          *con,      
-dasInfoStruct_t       *myInfo,
-struct mcexml_struct  *mceInxpt,   
-int                   *flag,
-StatusType            *status
-)
-{
-  float ampsPerCount = 3.7842374e-10; //24.8 microamps for 65535 counts of the DtoA
-  float nominal, currentWatts;
-  float offset, desired;
-  double squared;
-  int result;
-  char       mceCmd[FILE_LEN];
-  char       heatVal[]="rb bc1 bias 1";
-  char       biasVal[]="rb bc2 bias 1";
-  int stairHeightCnts;
-  int currentSetHeat, currentSetBias;
-
-  if (*status != STATUS__OK) return;
-
-  *flag = 0;
-  stairHeightCnts = 0;
-  stairCounter = 0;
-
-  /* Read the current heater setting */
-  sc2dalib_readmceVal(con, myInfo, mceInxpt, heatVal, &currentSetHeat, 1, status);
-  if (!StatusOkP(status)) 
-    {
-      ErsRep(0,status, "_initHeatBiasHandling: sc2dalib_readmceVal(1) failed to read heater value"); 
-      return;
-    }
-
-  /* Read the current TES bias setting */
-  sc2dalib_readmceVal(con, myInfo, mceInxpt, biasVal, &currentSetBias, 1, status);
-  if (!StatusOkP(status)) 
-    {
-      ErsRep(0,status, "_initHeatBiasHandling: sc2dalib_readmceVal(1) failed to read bias value"); 
-      return;
-    }
-  myInfo->detbias = currentSetBias;
-
-  /* Test to see if it is a fast flat field (heater sawtooth) */
-  if( (myInfo->drcontrol & FLATFIELD_BIT) != 0)
-    {
-      *flag = 1;
-
-      /* The stairNum we were given is the total count, but for heater sawtooths 
-         it really needs to be the number of steps in a quarter cycle */
-      myInfo->stairNum /= 4;
-
-      /* Use the current heater setting and stairHeight in femto watts 
-	 to calculate the step in D/A counts */
-
-      /* Calculate:
-	 currentWatts    -> The current Pixel Heater setting in watts
-	 offset          -> requested offset in watts (stairHeight is in femto watts)
-	 desired         -> The new desired setting in watts
-	 result          -> The new D/A setting that will yield the desired one 
-	 stairHeightCnts -> The different in D/A counts between result and currentSetHeat 
-
-	 This assumes a 2 ohm resistor */
-
-      currentWatts = (((float)currentSetHeat * ampsPerCount)*
-		      ((float)currentSetHeat * ampsPerCount)) * 2.0;
-      offset = (float)myInfo->stairHeight * 1.0e-15;
-      desired = currentWatts + offset;
-      squared = desired / 2.0;
-      if(squared > 0)
-	{
-	  result = sqrt(squared) / ampsPerCount;
-	}
-      else
-	{
-	  result = 1000;
-	}
-
-      stairHeightCnts = result - currentSetHeat;
-      if(stairHeightCnts < 1) stairHeightCnts = 1;
-      jitDebug(2 ,"currentWatts = %e offset %e desired %e squared %e result %d currentSetHeat %d height %d",
-	       currentWatts, offset, desired, squared, result, currentSetHeat, stairHeightCnts);
-
-      /* Now set the heater current to the result */
-
-      jitDebug(2," Set heater: wb bc1 bias %d \n", result);
-
-      sprintf(mceCmd, "wb bc1 bias %d", result);
-      // send cmd and get reply
-      sc2dalib_setmceVal(con,myInfo,mceInxpt,mceCmd,status);
-      if ( !StatusOkP(status) )
-	{
-	  ErsRep(0,status,"sc2dalib_initHeatBiasHandling: sc2dalib_setmceval(1) %s failed",mceCmd); 
-	  return;
-	}
-      /* fprintf(myInfo->fpLog,"_initHeatBiasHandling FLATFIELD %s\n",mceCmd); */
-
-      myInfo->stairQCycleCount = 0;
-      myInfo->stairNumCount = 0;
-      myInfo->stairPresentValue = result;
-      myInfo->stairHeightCnts = stairHeightCnts;
-      myInfo->pixelHeat = currentSetHeat;
-
-    } /* End of fast flat field initialization */
-  
-  /* Is it a heater ramp SEQUENCE? */
-  else if( (myInfo->drcontrol & HEATRAMP_BIT) != 0)
-    {
-      *flag = 2;
-
-      /* The stairNum we were given is the total count, but for heater ramps 
-         it really needs to be the number of steps in a half cycle */
-      myInfo->stairNum /= 2;
-
-      /* Heater ramps are done in DAC counts staring at stairStart stepping down stairNum/2
-         steps and the stepping back up again */
-
-      myInfo->stairHeightCnts = myInfo->stairHeight;
-      stairHeightCnts = myInfo->stairHeight;
-      myInfo->pixelHeat = myInfo->stairStart;
-      currentSetHeat = myInfo->stairStart;
-
-      /* Now set the heater current to this value */
-
-      jitDebug(2," Set heater: wb bc1 bias %d \n", currentSetHeat);
-
-      sprintf(mceCmd, "wb bc1 bias %d", currentSetHeat);
-      // send cmd and get reply
-      sc2dalib_setmceVal(con,myInfo,mceInxpt,mceCmd,status);
-      if ( !StatusOkP(status) )
-	{
-	  ErsRep(0,status,"sc2dalib_initHeatBiasHandling: sc2dalib_setmceval(2) %s failed",mceCmd); 
-	  return;
-	}
-      /* fprintf(myInfo->fpLog,"_initHeatBiasHandling HEATRAMP %s\n",mceCmd); */
-
-      myInfo->stairHCycleCount = 0;
-      myInfo->stairNumCount = 0;
-      myInfo->stairPresentValue = currentSetHeat;
-
-    }
-
-  /* Is it a TES Bias sawtooth SEQUENCE? */
-  else if( (myInfo->drcontrol & BIASSAW_BIT) != 0)
-    {
-      *flag = 3;
-
-      /* Bias sawtooths are done in DAC counts starting at the current value (plus one step)
-         and then sawtoothing around the current value and ending up at it */
-
-      myInfo->stairHeightCnts = myInfo->stairHeight;
-      stairHeightCnts = myInfo->stairHeight;
-
-      /* The stairNum we were given is the total count, but for bias sawtooths 
-         it really needs to be the number of steps in a quarter cycle */
-      myInfo->stairNum /= 4;
-
-      /* Using the current bias setting and 
-         stairHeight in DAC units calculate the first setting */
-
-      result = currentSetBias + stairHeightCnts;
-
-      /* Now set the TES bias to this value */
-
-      jitDebug(2," Set TES Bias: wb bc2 bias %d \n", result);
-
-      sprintf(mceCmd, "wb bc2 bias %d", result);
-      // send cmd and get reply
-      fprintf(myInfo->fpLog,"_initHeatBiasHandling BIASSAW %s\n",mceCmd);
-      sc2dalib_setmceVal(con,myInfo,mceInxpt,mceCmd,status);
-      if ( !StatusOkP(status) )
-	{
-	  ErsRep(0,status,"sc2dalib_initHeatBiasHandling: sc2dalib_setmceval(3) %s failed",mceCmd); 
-	  return;
-	}
-
-      myInfo->stairQCycleCount = 0;
-      myInfo->stairNumCount = 0;
-      myInfo->stairPresentValue = result;
-      myInfo->pixelHeat = currentSetHeat;
-    }
-
-  /* Is it bias ramp SEQUENCE? */
-  else if( (myInfo->drcontrol & BIASRAMP_BIT) != 0)
-    {
-      *flag = 4;
-
-      /* The stairNum we were given is the total count, but for bias ramps 
-         it really needs to be the number of steps in a half cycle */
-      myInfo->stairNum /= 2;
-
-      /* Bias ramps are done in DAC counts staring at stairStart stepping down stairNum/2
-         steps and then stepping back up again */
-
-      myInfo->stairHeightCnts = myInfo->stairHeight;
-      stairHeightCnts = myInfo->stairHeight;
-      myInfo->detbias = myInfo->stairStart;
-      currentSetBias = myInfo->stairStart;
-
-      /* Now set the TES Bias to this value */
-
-      jitDebug(2," Set TES Bias: wb bc2 bias %d \n", currentSetBias);
-
-      sprintf(mceCmd, "wb bc2 bias %d", currentSetBias);
-      // send cmd and get reply
-      fprintf(myInfo->fpLog,"_initHeatBiasHandling BIASRAMP %s\n",mceCmd);
-      sc2dalib_setmceVal(con,myInfo,mceInxpt,mceCmd,status);
-      if ( !StatusOkP(status) )
-	{
-	  ErsRep(0,status,"sc2dalib_initHeatBiasHandling: sc2dalib_setmceval(4) %s failed",mceCmd); 
-	  return;
-	}
-
-      myInfo->stairHCycleCount = 0;
-      myInfo->stairNumCount = 0;
-      myInfo->stairPresentValue = currentSetBias;
-      myInfo->pixelHeat = currentSetHeat;
-    }
-
-  else /* It will either be a standard SEQUENCE, or a slow flat field */
-    {
-      /* test to see if it is a standard sequence */
-
-      if ( myInfo->pixelHeat == -99999 )
-	{
-	  myInfo->pixelHeat = currentSetHeat; 
-	}
-      else /* This is going to be a slow flat field */
-	{
-
-	  /* Calculate:
-	     nominal -> The nominal Pixel Heater setting in watts
-	     offset  -> requested offset in watts (pixelHeat is in femto watts)
-	     desired -> The new desired setting in watts
-	     result  -> The new D/A setting that will yield the desired one */
-
-	  nominal = (((float)myInfo->nominalPixelHeat * ampsPerCount)*
-		     ((float)myInfo->nominalPixelHeat * ampsPerCount)) * 2.0;
-	  offset = (float)myInfo->pixelHeat * 1.0e-15;
-	  desired = nominal + offset;
-	  squared = desired / 2.0;
-	  if(squared > 0)
-	    {
-	      result = sqrt(squared) / ampsPerCount;
-	    }
-	  else
-	    {
-	      result = 1000;
-	    }
-	  currentSetHeat = myInfo->pixelHeat = result;
-
-	  /* Now set the heater current to this value */
-
-	  jitDebug(2," Set heater: wb bc1 bias %d \n", myInfo->pixelHeat); 
-	  sprintf(mceCmd, "wb bc1 bias %d", myInfo->pixelHeat);
-	  // send cmd and get reply
-	  /* fprintf(myInfo->fpLog,"_initHeatBiasHandling slow flat %s\n",mceCmd);*/
-	  sc2dalib_setmceVal(con,myInfo,mceInxpt,mceCmd,status); 
-	  if ( !StatusOkP(status) )
-	    {
-	      ErsRep(0,status,"sc2dalib_initHeatBiasHandling: sc2dalib_setmceval(2) %s failed",mceCmd); 
-	      return;
-	    }
-	  // sleep for 10ms for heater to settle down
-	  usleep(10000);
-	}
-    }
-
-  sc2headman_initHeatBiasHandling(*flag, currentSetHeat, currentSetBias, stairHeightCnts, myInfo->stairNum,
-				myInfo->stairWidth, status);
-
-}
-
-/**
  * \fn void sc2dalib_initInit(SDSU_CONTEXT *con,dasInfoStruct_t *myInfo, 
  *  char *xmlfilename, StatusType *status)
  *
@@ -3189,7 +1839,7 @@ StatusType            *status
   if (*status != STATUS__OK) return;
 
   // Update debug flag, in case it has changed 
-  sc2dalib_updateDebug(con,myInfo, status);
+  utils_update_debug(con,myInfo, status);
   
   SdpGeti("IN_SEQUENCE", &in_sequence, status);
   if(in_sequence != DA_MCE_NONE)
@@ -3236,7 +1886,7 @@ StatusType            *status
   sprintf (myInfo->logfileName, "/tmp/%s/logcmd",getenv("USER"));
 
   strcat(myInfo->logfileName,myInfo->Date);
-  my_fclose(&(myInfo->fpLog));
+  utils_fclose(&(myInfo->fpLog));
   if((myInfo->fpLog = fopen64(myInfo->logfileName,"w")) == NULL )
   {
     *status = DITS__APP_ERROR;
@@ -3397,7 +2047,6 @@ StatusType            *status
   sc2dalib_initInitReadXML(con,myInfo,xmlfilename,status); 
   if (!StatusOkP(status))
     ErsRep(0,status, "sc2dalib_intInitRTSC: failed to call sc2dalib_initInitReadXML"); 
-
 }
 
 
@@ -3849,13 +2498,11 @@ int                   *mcePort,
 StatusType            *status
 )
 {
-  int  rval;
   char dateTime[40];
   char dataform[40];
 
   if (*status != STATUS__OK) return;
 
-#ifndef NOTUSE_MCE 
   long tmp;
   int  i,j;
   char  arrayID[]="rb cc array_id 1 ";
@@ -3869,7 +2516,7 @@ StatusType            *status
  
   if(*mcePort == 0xFF)
     {
-      sc2dalib_readmceVal(con,myInfo,mceinxPtr,arrayID, mcePort,1,status);
+      mce_read(con,myInfo,mceinxPtr,arrayID, mcePort,1,status);
       if (!StatusOkP(status)) 
 	return;
     }
@@ -3903,14 +2550,11 @@ StatusType            *status
         i,myInfo->subArray[i].id,myInfo->wavelen,myInfo->filter);
   
   // use this to get row_len, num_rows 
-  sc2dalib_readframeRate(con,myInfo,mceinxPtr,&tmp,status);
+  mce_read_frame_rate(con,myInfo,mceinxPtr,&tmp,status);
   if ( *status ==DITS__APP_ERROR)
     return;
-#else
-   strcpy(name,myInfo->givenarrayName);
-#endif
 
-  rval=sc2dalib_finddateTime(DAS_DATETIME,dateTime);
+  utils_get_time(DAS_DATETIME,dateTime);
 
   ArgPutString(myInfo->statId, "ARRAY_CNNTED",name, status);
   // change logfile to array related
@@ -3920,7 +2564,7 @@ StatusType            *status
   SdpPutString(SC2DALOGFILE,myInfo->logFile, status);
   
   strcat(myInfo->logfileName,myInfo->Date);
-  my_fclose(&(myInfo->fpLog));
+  utils_fclose(&(myInfo->fpLog));
   if((myInfo->fpLog = fopen64(myInfo->logfileName, "a")) == NULL)
   {
     *status = DITS__APP_ERROR;
@@ -3982,500 +2626,6 @@ StatusType *status
   }
 }
 
-
-// =======sc2dalib_h*******
-//====================//
-/**
- * \fn void sc2dalib_heaterslopeInit(SDSU_CONTEXT *con,dasInfoStruct_t *myInfo, 
- *  char *dateTime, StatusType *status)
- *
- * \brief function: 
- *  read in all args from the heater setup .
- *
- * \param con           SDSU context structure
- * \param myInfo       dasInfo structure pointer
- * \param dateTime      string pointer to dateTime string
- * \param status        StatusType     
- *
- */
-/*+ sc2dalib_heaterslopeInit
-*/
-void sc2dalib_heaterslopeInit
-(
-SDSU_CONTEXT      *con,
-dasInfoStruct_t   *myInfo, 
-char              *dateTime,
-StatusType         *status
-)
-{
-  long       in_sequence;
-  long       range[]={0,3};
-  DitsArgType  argId;
-
-  if (*status != STATUS__OK) return;
-
-  // Update debug flag, in case it has changed 
-  sc2dalib_updateDebug(con,myInfo,status);
- 
-  SdpGeti("IN_SEQUENCE", &in_sequence, status);
-  if(in_sequence != DA_MCE_NONE)
-  {
-    *status = DITS__APP_ERROR;
-    ErsRep(0,status,"sc2dalib_heaterslopeInit: %s has not completed",
-             seqStatus[myInfo->actionFlag]);
-    return;
-  } 
-
-  myInfo->actionFlag=HEATERSLOPE;
-
-  argId = DitsGetArgument();
-  jitArgGetI(argId, "SVFILE_FLAG", 1, range, 2, 0,
-	      &myInfo->filesvFlag, status );
-  //default 2 ?
-  jitArgGetS(argId,"DATA_FILE",2,NULL,"data.txt",0, FILE_LEN,
-            myInfo->dataFile, NULL,status );
-  jitArgGetS (argId, "SETUP_FILE", 3,NULL, "setup-heaterslope", 0, FILE_LEN,
-              myInfo->batchFile,  NULL,status);
-  if ( !StatusOkP(status) )
-  {
-    ErsRep(0,status,"sc2dalib_heaterslopeInit: failed to get variables.");
-    return;
-  }
-  sc2dalibsetup_servoreadsetupWrap(myInfo,status);
-  if ( !StatusOkP(status) )
-  {
-    ErsRep(0,status,"sc2dalib_heaterslopeInit: sc2dalibsetup_servoreadsetupWrap failed"); 
-    return;
-  }
-  my_fclose(&(myInfo->fpBatch));
-  if((myInfo->fpBatch = fopen(myInfo->batchFile,"r")) == NULL )
-    {
-      *status = DITS__APP_ERROR;
-      ErsRep (0, status, "Error- sc2dalib_heaterslopeInit: failed to open file %s", myInfo->batchFile); 
-      return;
-    }
-  jitDebug(16,"sc2dalib_heaterslopeInit: read %s\n",myInfo->batchFile);
-
-  sc2dalibsetup_readheaterSetup(myInfo, status);
-
-  if ( !StatusOkP(status) )
-  {
-    ErsRep(0,status,"sc2dalib_heaterslopeInit:sc2dalibsetup_readheaterSetup failed");
-    // in sc2dalib__heatslope call sc2dalib_actionfileEnd to close file
-    return;
-  }
-  my_fclose(&(myInfo->fpData));
-  if((myInfo->fpData = fopen( myInfo->dataFile, "a" )) == NULL )
-    {
-      *status = DITS__APP_ERROR;
-      ErsRep (0, status, "Error- sc2dalib_heaterslopeInit:2 failed to open file %s", myInfo->dataFile); 
-      return;
-    }
-  // use batchFile for storing the mean pixel data 
-  sprintf(myInfo->batchFile,"%s-row%d-col%d",myInfo->dataFile, 
-          myInfo->heatSlp.row, myInfo->heatSlp.col);
-
-  my_fclose(&(myInfo->fpBatch));
-  if((myInfo->fpBatch = fopen(myInfo->batchFile, "w")) == NULL)
-  {
-    *status=DITS__APP_ERROR;
-    ErsRep(0,status,
-	   "sc2dalib_heaterslopeInit: failed to open %s, check permission",
-           myInfo->batchFile); 
-    // in sc2dalib__heatslope call sc2dalib_actionfileEnd to close files
-    return;
-  }
-  // use strchartFile for storing the pixel data ( every point) 
-  if(myInfo->filesvFlag >0 )
-  {
-    sprintf(myInfo->strchartFile,"%s-row%d-col%d-pixel",myInfo->dataFile, 
-          myInfo->heatSlp.row, myInfo->heatSlp.col);
-    my_fclose(&(myInfo->fpStrchart));
-    if((myInfo->fpStrchart = fopen(myInfo->strchartFile, "w")) == NULL)
-    {
-      *status=DITS__APP_ERROR;
-      ErsRep(0,status,
-	     "sc2dalib_heaterslopeInit: failed to open %s, check permission",
-           myInfo->strchartFile);
-      // in sc2dalib__heatslope call sc2dalib_actionfileEnd to close file
-      return;
-    }
-  }
-}
-
-
-/**
- * \fn void sc2dalib_heaterSlope(dasInfoStruct_t *myInfo, 
- *  int *heaterMask, double *heaterSlope, StatusType *status)
- *
- * \brief function: 
- *  find the pixel heater slope from the heater data.
- *
- * \param myInfo       dasInfo structure pointer
- * \param heaterMask int pointer, get slope if pixelMask=1,
- * \param  heaterSlope double pointer
- * \param status        StatusType     
- *
- */
-/*+ sc2dalib_heaterSlope
-*/
-void sc2dalib_heaterSlope
-(
-dasInfoStruct_t  *myInfo,
-int              *heaterMask,
-double           *heaterSlope,
-StatusType        *status
-)
-{
-  int     howmany, pixelData,onepixel;
-  int     i, nStep,pixel, totalPixel;
-  int     svpixelFlag;
-  double  *chData, *ithchData;
-  double  *pixelPtr,*powerPtr,*weight;
-  double  heat,dcLvl,slope;
-  double  fullDC=65535, pixelResist=2, current=24.8, c;
-
-  if (*status != STATUS__OK) return;
-
-  nStep=myInfo->heatSlp.nStep+1;
-
-  /* Current is full scale microamps
-     fullDC is full scale DtoA counts
-     pixelResist is nominal pixel heater resistor in ohms
-     So current/fullDC is microamps per count
-     then c equals: R * I^2 or microwatts per DtoA count */
-
-  c= pixelResist*pow(current/fullDC,2);
-
-  chData=(double *)calloc( nStep*ROW_NUM*COL_NUM, sizeof(double));
-  if (chData==NULL)
-  {  
-    *status=DITS__APP_ERROR;
-    ErsRep(0,status,"sc2dalib_heaterSlope: failed to calloc for nStep*chdata\n"); 
-    return;
-  }
-
-  pixelPtr=(double *)calloc( nStep, sizeof(double));
-  if (pixelPtr==NULL)
-  {  
-    *status=DITS__APP_ERROR;
-    ErsRep(0,status,"sc2dalib_heaterSlope: failed to calloc for pixel data\n");
-    free(chData); 
-    return;
-  }
-
-  powerPtr=(double *)calloc( nStep, sizeof(double));
-  if (powerPtr==NULL)
-  {  
-    *status=DITS__APP_ERROR;
-    ErsRep(0,status,"sc2dalib_heaterSlope: failed to calloc for powerVal\n"); 
-    free(pixelPtr);
-    free(chData);
-    return;
-  } 
-
-  weight=(double *)calloc( nStep, sizeof(double));
-  if (weight==NULL)
-  {  
-    *status=DITS__APP_ERROR;
-    ErsRep(0,status,"sc2dalib_heaterSlope:failed to calloc for weight data\n"); 
-    free(pixelPtr);
-    free(powerPtr);
-    free(chData); 
-   return;
-  }
-
-  svpixelFlag=myInfo->filesvFlag;
-  if ( myInfo->filesvFlag >0 )
-    myInfo->filesvFlag=1;
-
-  // loop through all nStep
-  for (i=0; i<nStep; i++)
-  {
-
-    printf("sc2dalib_heaterSlope working on step: %d\n",i);
-
-    // myInfo->svfileFlag=3 save only individual pixel from the first 
-    // heat file, myInfo->svfileFlag=1 save all
-    if (svpixelFlag==3 && i==1)
-      myInfo->filesvFlag=0;
-      
-    // use cmdrepFile for the heater data file
-    sprintf(myInfo->cmdrepFile,"%s/%s-%d-eng.txt",getenv("CURRENTDATADIR"),
-            myInfo->heatSlp.base, i);
-    my_fclose(&(myInfo->fpOtheruse));
-    if ((myInfo->fpOtheruse = fopen( myInfo->cmdrepFile, "r" )) == NULL)
-    {  
-      *status=DITS__APP_ERROR;
-      ErsRep(0,status,
-        "sc2dalib_heaterSlope: failed to open %s, check file permission",
-        myInfo->cmdrepFile); 
-      // in sc2dalib__heatslope call sc2dalib_actionfileEnd to close file
-      free(pixelPtr);
-      free(powerPtr);
-      free(chData);
-      free(weight);
-      return ;
-    }
-
-    /* heat is starting setting (in DtoA counts) minus the size 
-       of the step times i (loop counter) */
-    heat=myInfo->heatSlp.stVal - myInfo->heatSlp.step*i;
-    /* If we now multiply the heater DtoA setting by microwatts per DtoA count
-       we get the microwatts being put into the pixel by the heater */
-    heat= c * pow(heat, 2);
-    fprintf(myInfo->fpData,"%11.2f", heat);
-    fprintf(myInfo->fpBatch,"%11.2f",heat);
-
-    ithchData=chData+ i*ROW_NUM*COL_NUM;
-
-    // return the averaged frame in ithchData, a single pixel data in pixelData
-    // return howmany-frame for heaterStep=i
-    sc2dalibsetup_readheaterData(myInfo, &howmany, ithchData, &pixelData, heaterMask,status);
-    if ( !StatusOkP(status) ) 
-    {
-      free(pixelPtr);
-      free(powerPtr);
-      free(weight);
-      free(chData); 
-      // in sc2dalib__heatslope call sc2dalib_actionfileEnd to close file
-      ErsRep(0,status,"sc2dalib_heaterSlope: sc2dalib_readheaterData failed"); 
-      return;
-    }
-    /* Note that weight does not change it is a constant 1
-       and the power is being written to powerPtr */
-
-    powerPtr[i]=heat;
-    weight[i]=1;
-
-    my_fclose(&(myInfo->fpOtheruse));
-    
-    MsgOut(status," %d frames average completed for (%s-%d)",
-           howmany,  myInfo->heatSlp.base, i);
-
-    jitDebug(2," %d frames from (%s) %s-%d, meanVal to %s %s\n",
-      howmany,  getenv("CURRENTDATADIR"), myInfo->heatSlp.base, i,
-      myInfo->dataFile, myInfo->batchFile);
-  }
-
-  //now, we have power[0..nstep], weight[0..nstep] and chData[0..nstep][ROW*COL]
-  // go through pixels, but not dark row
-
-  totalPixel=(ROW_NUM-1)*COL_NUM;
-  onepixel=myInfo->heatSlp.row*myInfo->heatSlp.col;
-  for (pixel=0; pixel<totalPixel; pixel++)
-  {
-    if (heaterMask[pixel]!=0) 
-    {
-      for (i=0; i<nStep; i++)
-      {
-        pixelPtr[i]= *(chData + i*ROW_NUM*COL_NUM + pixel);
-	printf("Pixel: %d  power %f  sq1FDBK  %f \n",pixel,powerPtr[i],pixelPtr[i]);
-      }
-      
-      /* linear fit of the Sq1FDBK units per microwatt */
-      sc2math_linfit(nStep, powerPtr, pixelPtr,weight, &slope,&dcLvl,status);
-      printf("Pixel: %d  slope %f  offset  %f \n",pixel,slope,dcLvl);
-      heaterSlope[pixel]=slope;
-    }
-    else
-     heaterSlope[pixel]=0;
-
-    if (pixel == onepixel )
-    {
-       myInfo->heatSlp.slope=slope;
-       myInfo->heatSlp.refFDBK=(int)pixelPtr[myInfo->heatSlp.ref];
-    }
-  }
-  free(pixelPtr);
-  free(powerPtr);
-  free(weight);
-  free(chData);
-  sc2dalib_heaterslopeSave(myInfo, heaterSlope,status);
-  return; 
-}
-
-
-/**
- * \fn void sc2dalib_heaterslopeRead(dasInfoStruct_t *myInfo, 
- *  double *pixelSlope, StatusType *status)
- *
- * \brief function
- *   Opens the file heaterslope.xml
- *   Reads the contents of that file into an SDS structure
- *   Walks the structure row by row and places the values read into pixelSlope
- *   I think this array is a global parameter called heaterSlope in sc2da.c
- *
- *  get args for HEATER_TRACK action and fill pixelSlope array 
- *
- * \param myInfo      dasInfo structure pointer
- * \param pixelSlope  double pointer for pixelSlope array
- * \param status       StatusType     
- *
- */
-/*+ sc2dalib_heaterslopeRead
-*/
-void sc2dalib_heaterslopeRead
-(
-dasInfoStruct_t   *myInfo,    
-double            *pixelSlope,
-StatusType        *status
-)
-{
-  SdsIdType slopeId=0;   //id for HEATER_SLOPE structure 
-  SdsIdType rowId;       //  id for row structure 
-  SdsIdType id = 0;
-  SdsCodeType code;
-  
-  char  name[FILE_LEN];
-  char  delimiters[]= " ",*token;
-  char  cardName[FILE_LEN], rc[50];
-
-  long  ndims;            /* number of dimensions in row */
-  long  rowNo;
-  int   j,i, pixel,card;
-  unsigned long dims[7];       
-  unsigned long indims[7];
-
-  if (*status != STATUS__OK) return;   
-
-  // the heaterslope.xml needs to be in $SC2SCRATCH
-  sprintf (name, "%s/%s.xml", getenv ( "SC2SCRATCH" ),PIXELHEATER_SLOPE );
-
-  jitXML2Sds ( strlen(name),name, &slopeId,status );
-  if (!StatusOkP(status))
-  {
-    ErsRep(0,status, "sc2dalib_heaterslopeRead: jitXML2Sds failed to read file: %s",name); 
-   return;
-  }
-  //MsgOut(status," pixelSlopeXML=%s",name);
- 
-  //SdsList( slopeId,status);
-
-  //slopeId is top SDS, the rest is sub sds. get sub-sds 
-  dims[0] = dims[1] = 0;
-
-  SdsFind ( slopeId, "row", &rowId, status );
-  SdsInfo ( rowId, name, &code, &ndims, dims, status );  
-  if (!StatusOkP(status))
-  {
-    ErsRep(0,status,"sc2dalib_heaterslopeRead: find row failed"); 
-    return;
-  }
-  jitDebug(2,"rowId's name =%s ndims=%d, dims[0]=%d dims[1]=%d\n",
-             name, ndims, dims[0],dims[1]);
-
-  // slope=0: initialised during load task
-  pixel=0;
-  for ( j=0; j<dims[0]; j++ )
-  {
-    indims[0] = j + 1;
-
-    // from rowId ( SDS array), get each item from row structure 
-    SdsCell ( rowId, 1, indims, &id, status ); 
-
-    // from each array[x], get item, 
-    ArgGeti(id, "Count", &rowNo,status);
-    if (StatusOkP(status))
-    {
-      pixel=(int)rowNo*32;
-       
-      for (card=1; card<=4; card++)
-      {
-        sprintf(cardName,"rc%d",card);
-        ArgGetString(id, cardName, FILE_LEN, rc, status );
-        if (StatusOkP(status))
-        {
-          token = strtok (rc, delimiters);
-          pixelSlope[pixel]=atof(token);
-          for ( i=1; i<8; i++)
-          {
-            pixel ++;
-            token=strtok(NULL,delimiters);
-            pixelSlope[pixel]=atof(token);
-          }
-          pixel ++;
-        }
-        else
-          ErsRep(0,status, "sc2dalib_heaterslope: failed in cardName row(%d) pixel(%d)",
-                  j,pixel);
-      }
-    }
-    if (!StatusOkP(status))
-    {
-      ErsRep(0,status,"sc2dalib_heaterslopeRead: failed in Count" ); 
-      return;
-    }
-    SdsFreeId ( id, status );
-  }
-  SdsFreeId ( rowId, status );
-  SdsFreeId ( slopeId, status );
-}
-
-
-/**
- * \fn void sc2dalib_heaterslopeSave(dasInfoStruct_t *myInfo,
- *  double *heaterSlope, StatusType *status)
- *
- * \brief function
- *  save heater slope and ref feed back to heaterslopeTable 
- *
- * \param  myInfo dasInfoStruct_t pointer
- * \param  heaterSlope double pointer
- * \param  status StatusType.  given and return
- *
- */
-/*+ sc2dalib_heaterslopeSave
-*/
-void sc2dalib_heaterslopeSave
-(
-dasInfoStruct_t *myInfo,
-double          *heaterSlope,
-StatusType      *status
-
-)
-{
-  char   tmpfile1[FILE_LEN];
-  int    row, card,pixel,i;
-  FILE   *fp;
-
-  if (*status != STATUS__OK) return;
-
-  sprintf (tmpfile1, "%s/%s.xml", getenv ( "SC2SCRATCH" ),PIXELHEATER_SLOPE );
-  if((fp=fopen(tmpfile1, "w")) == NULL )
-  {
-    *status = DITS__APP_ERROR;
-    ErsRep (0, status, "sc2dalib_heaterslopeSave: Error- failed to open file %s", tmpfile1); 
-    return;
-  }
-  fprintf(fp,"<!--- this is extracted after mceheaterslope    -->\n");
-  fprintf(fp,"<!--- slope !=0 means the pixel's power values  -->\n");
-  fprintf(fp,"<!--- is used for calculating updated heaterVal -->\n\n");
-  fprintf(fp,"<HEATERSLOPE>\n");
-  fprintf(fp,"  <REFHEAT>%d </REFHEAT>\n",myInfo->heatSlp.refHeat);
-  fprintf(fp,"  <REFFDBK>%d </REFFDBK>\n",myInfo->heatSlp.refFDBK);
-  // go through pixels
-  for (row=0; row<40; row ++)
-  {  
-    fprintf(fp,"  <row Count=\"%d\"\n",row);
-    pixel=row*COL_NUM;
-    for (card=1; card<=4; card ++)
-    {
-      fprintf(fp,"    rc%d=\"",card);
-      for ( i=0; i<8; i++)
-      {
-        fprintf(fp,"%11.3f ",heaterSlope[pixel]);
-        pixel ++;
-      }
-      fprintf(fp,"\"\n"); 
-    }
-    fprintf(fp,"  />\n");     
-  }
-  fprintf(fp,"</HEATERSLOPE>\n");
-  fclose(fp);
-}
-
-
 // =======sc2dalib_m*******
 //====================//
 /**
@@ -4510,7 +2660,7 @@ StatusType            *status
   if (*status != STATUS__OK) return;
 
   // Update debug flag, in case it has changed 
-  sc2dalib_updateDebug(con,myInfo, status);
+  utils_update_debug(con,myInfo, status);
 
   // Do not continue if MCE-xml is not read or in a data taking mode 
   if( myInfo->doneReadxml==0)
@@ -4548,10 +2698,10 @@ StatusType            *status
       return;
     }
   } 
-  sc2dalib_openFiles(myInfo,NODATAFILE,NOBATCHFILE,status);
+  utils_open_files(myInfo,NODATAFILE,NOBATCHFILE,status);
   if ( !StatusOkP(status) )
   {
-    ErsRep(0,status,"sc2dalib_mcecmdInit: sc2dalib_openFiles failed.");
+    ErsRep(0,status,"sc2dalib_mcecmdInit: utils_open_files failed.");
     return;
   }  
   fprintf(myInfo->fpLog,"\n<%s> CMD for sc2dalib__Mcecmd <%s>\n",
@@ -4604,7 +2754,7 @@ StatusType            *status
   if (*status != STATUS__OK) return;
 
   // Update debug flag, in case it has changed 
-  sc2dalib_updateDebug(con,myInfo, status);
+  utils_update_debug(con,myInfo, status);
 
   // Do not continue if not initialized or in a data taking mode 
   SdpGeti("INITIALISED", &initialised, status);
@@ -4624,99 +2774,6 @@ StatusType            *status
     return;
   }
   sc2dalib_cnvtbatch2Cmd(setfile,mymceCmd->mceCmd, status);
-}
-
-
-
-/**
- * \fn void sc2dalib_mceerrRep(dasInfoStruct_t *myInfo,
- *  dasCmdInfo_t *mycmdInfo, StatusType *status)
- *
- * \brief functaion
- *  check reply status from MCE and report it
- *
- * \param myInfo    dasInfoStruct_t  pointer
- * \param mycmdInfo  dasCmdInfo_t  pointer
- * \param status     StatusType.  given and return(STATUS__OK)
- *
- * report the Hardware error
- */
-/*+ sc2dalib_mceerrRep - 
-*/
-void sc2dalib_mceerrRep
-(
-dasInfoStruct_t *myInfo,
-dasCmdInfo_t    *mycmdInfo,
-StatusType      *status
-)
-{
-  time_t   tm;
-  char localmsg[FILE_LEN];
-
-  // message print and save to logfile, 
-  // flag=0, use MsgOut, 
-  // flag=1, use ErsOut, 
-  // flag=2 use ErsRep
-  tm = time(NULL);
-  fprintf (myInfo->fpLog,"%s",asctime(localtime(&tm)) );
-
-  // *status != OK from entry, *status not changed after call
-  // sc2dalib_msgprintSave as 2 is used
-  sc2dalib_msgprintSave(myInfo,"sc2dalib_mceerrRep: executing command (%s)",
-          mycmdInfo->mceCmd,USE_ERSREP,status);
-  if (mycmdInfo->reply.status==MCE_NONREPLY)   
-  {
-    sc2dalib_msgprintSave(myInfo,
-      "sc2dalib_mceerrRep: NO REPLY from driver when sdsu_command_mce ",
-      "",USE_ERSOUT,status);
-    sc2dalib_msgprintSave(myInfo,
-      "sc2dalib_mceerrRep: mceTask exits?", "",USE_ERSREP,status);
-  }
-  else if (mycmdInfo->reply.status==DRV_MCEERR)   
-  {
-    if( mycmdInfo->reply.data[0]==PCI2MCE_TMO || 
-        mycmdInfo->reply.data[0]==INT2MCE_TMO )
-    { 
-      sc2dalib_msgprintSave(myInfo,
-        "sc2dalib_mceerrRep: %s",drvErrors[mycmdInfo->reply.data[0]],USE_ERSREP,status);
-    }
-    else 
-    {
-      sc2dalib_msgprintSave(myInfo,
-        "sc2dalib_mceerrRep: %s",drvErrors[mycmdInfo->reply.data[0]],USE_ERSREP,status);
-      sprintf(localmsg,"%#lX",mycmdInfo->reply.data[1]);
-      sc2dalib_msgprintSave(myInfo,"sc2dalib_mceerrRep: %s",localmsg,USE_ERSREP,status);
-    }
-  }
-  else                                
-  {
-    sprintf(localmsg,"CardIdParam=%08lX ErrNo=%08lX",
-             mycmdInfo->reply.data[0],mycmdInfo->reply.data[1]);
-    if (mycmdInfo->reply.status == MCE_WBER ) 
-      sc2dalib_msgprintSave(myInfo,
-                       "sc2dalib_mceerrRep: WBER %s",localmsg,USE_ERSREP,status); 
-    else if (mycmdInfo->reply.status == MCE_RBER )
-      sc2dalib_msgprintSave(myInfo,
-                       "sc2dalib_mceerrRep: RBER %s",localmsg,USE_ERSREP,status); 
-    else if (mycmdInfo->reply.status == MCE_GOER )
-     sc2dalib_msgprintSave(myInfo,
-                       "sc2dalib_mceerrRep: GOER %s",localmsg,USE_ERSREP,status); 
-    else if (mycmdInfo->reply.status == MCE_STER )
-      sc2dalib_msgprintSave(myInfo,
-                       "sc2dalib_mceerrRep: STER %s",localmsg,USE_ERSREP,status); 
-    else if (mycmdInfo->reply.status == MCE_RSER )
-      sc2dalib_msgprintSave(myInfo,
-                       "sc2dalib_mceerrRep: RSER %s",localmsg,USE_ERSREP,status);
-    else if (mycmdInfo->reply.status == MCE_RSER )
-      sc2dalib_msgprintSave(myInfo,
-                       "sc2dalib_mceerrRep: RSER %s",localmsg,USE_ERSREP,status);
-    else 
-    {
-      sprintf(localmsg,"the error Status word(%08lx) is wrong",
-                mycmdInfo->reply.status);
-      sc2dalib_msgprintSave(myInfo,"sc2dalib_mceerrRep:%s",localmsg, USE_ERSREP,status);  
-    }
-  } 
 }
 
 
@@ -4754,16 +2811,16 @@ StatusType      *status
   strncpy(cmd,mycmdInfo->mceCmd,2);
 
   // *status != OK from entry, *status not changed after call
-  // sc2dalib_msgprintSave as 2 is used
-  sc2dalib_msgprintSave(myInfo,"sc2dalib_mceerrnewRep: executing command (%s)",
+  // utils_msg as 2 is used
+  utils_msg(myInfo,"sc2dalib_mceerrnewRep: executing command (%s)",
           mycmdInfo->mceCmd,USE_ERSREP,status);
 
   if (mycmdInfo->reply.status==MCE_NONREPLY)   
   {
-    sc2dalib_msgprintSave(myInfo,
+    utils_msg(myInfo,
       "sc2dalib_mceerrnewRep: NO REPLY from driver when sdsu_command_mce ",
       "",USE_ERSOUT,status);
-    sc2dalib_msgprintSave(myInfo,
+    utils_msg(myInfo,
       "sc2dalib_mceerrnewRep: mceTask exits?", "",USE_ERSREP,status);
   }
   else if (mycmdInfo->reply.status==DRV_MCEERR)   
@@ -4771,17 +2828,17 @@ StatusType      *status
     if( mycmdInfo->reply.data[0]==PCI2MCE_TMO || 
         mycmdInfo->reply.data[0]==INT2MCE_TMO )
     { 
-      sc2dalib_msgprintSave(myInfo,
+      utils_msg(myInfo,
         "sc2dalib_mceerrnewRep: %s",drvErrors[mycmdInfo->reply.data[0]],
         USE_ERSREP,status);
     }
     else 
     {
-      sc2dalib_msgprintSave(myInfo,
+      utils_msg(myInfo,
         "sc2dalib_mceerrnewRep: %s",drvErrors[mycmdInfo->reply.data[0]],
         USE_ERSREP,status);
         sprintf(localmsg,"%#lX",mycmdInfo->reply.data[1]);
-      sc2dalib_msgprintSave(myInfo,"sc2dalib_mceerrnewRep: %s",localmsg,
+      utils_msg(myInfo,"sc2dalib_mceerrnewRep: %s",localmsg,
         USE_ERSREP,status);
     }
   }
@@ -4789,7 +2846,7 @@ StatusType      *status
   {
     sprintf(localmsg,"%s:the error word(%08lx)",
               cmd,mycmdInfo->reply.status);
-    sc2dalib_msgprintSave(myInfo,"sc2dalib_mceerrnewRep:%s",localmsg, 
+    utils_msg(myInfo,"sc2dalib_mceerrnewRep:%s",localmsg, 
         USE_ERSREP,status);  
     
     errNo= mycmdInfo->reply.status;
@@ -4832,7 +2889,7 @@ StatusType      *status
   char localmsg[FILE_LEN];
 
   // *status != OK from entry, *status not changed after call
-  // sc2dalib_msgprintSave as 2 is used
+  // utils_msg as 2 is used
   if ( errNo!=0)
   {
     if (errNo==1)
@@ -4844,12 +2901,12 @@ StatusType      *status
     else 
     {
       sprintf(localmsg,"%s(%3s, %#X), wrong errno",mceCmd,cardName, errNo);
-      sc2dalib_msgprintSave(myInfo,"sc2dalib_mceerreachCard: %s",localmsg,
+      utils_msg(myInfo,"sc2dalib_mceerreachCard: %s",localmsg,
          USE_ERSREP,status);
       return;
     }
     sprintf(localmsg,"%s(%3s, %#X), %s",mceCmd,cardName, errNo,mceErrors[mceErr]);
-    sc2dalib_msgprintSave(myInfo,"sc2dalib_mceerreachCard: %s",localmsg,
+    utils_msg(myInfo,"sc2dalib_mceerreachCard: %s",localmsg,
          USE_ERSREP,status);
   }
 }
@@ -4886,7 +2943,7 @@ StatusType            *status
   if (*status != STATUS__OK) return;
 
   // Update debug flag, in case it has changed 
-  sc2dalib_updateDebug(con,myInfo, status);
+  utils_update_debug(con,myInfo, status);
 
   // Do not continue if not initialized or in a data taking mode 
   SdpGeti("INITIALISED", &initialised, status);
@@ -4919,10 +2976,10 @@ StatusType            *status
   // always save ( appending ) the result
   myInfo->filesvFlag=1;
 
-  sc2dalib_openFiles(myInfo,NODATAFILE,NOBATCHFILE,status);
+  utils_open_files(myInfo,NODATAFILE,NOBATCHFILE,status);
   if ( !StatusOkP(status) )
   {
-    ErsRep(0,status,"sc2dalib_mcestatusInit: sc2dalib_openFiles failed");
+    ErsRep(0,status,"sc2dalib_mcestatusInit: utils_open_files failed");
     return;
   }  
   fprintf(myInfo->fpLog,"\n<%s> CMD for sc2dalib__MceStatus ",dateTime);
@@ -4931,214 +2988,6 @@ StatusType            *status
   SdpPuti("IN_SEQUENCE",DA_MCE_NONE,status);
   con->process.framesetup= DA_MCE_NONE;
 }
-
-
-/**
- * \fn void sc2dalib_msgprintSave(dasInfoStruct_t *myInfo, char *string, 
- *   char *string2, int flag, StatusType *status)
- *
- * \brief function
- *  report error and save it into logfile
- *
- * \param myInfo  dasInfoStruct_t  pointer
- * \param string   char pointer  the string
- * \param string2  char pointer  the second string
- * \param flag     int  =0, use MsgOut, =1 use ErsOut, =2 ErsRep  3, printf, >3 no print
- * \param status   StatusType.  given and return(STATUS__OK)
- *
- */
-/*+ sc2dalib_msgprintSave
-*/
-void sc2dalib_msgprintSave
-(
-dasInfoStruct_t *myInfo, 
-char            *string, 
-char            *string2,
-int             flag,
-StatusType      *status
-)
-{
-  if(flag == USE_MSGOUT)
-   MsgOut(status, string,string2);
-  else if (flag == USE_ERSOUT)
-    ErsOut(0,status,string,string2);
-  else if  (flag == USE_ERSREP)
-    ErsRep(0,status,string,string2);
-  else if  (flag == USE_PRINT)
-  {
-    printf(string,string2); printf("\n");
-  }
-
-  fprintf(myInfo->fpLog, string,string2);
-  fprintf(myInfo->fpLog, "\n");
-  fflush(myInfo->fpLog);
-  if (myInfo->filesvFlag==1)
-  {
-    // also save into the specified file
-    if(myInfo->fpMcecmd !=NULL)
-    {  
-      fprintf(myInfo->fpMcecmd,string,string2);
-      fprintf(myInfo->fpMcecmd, "\n");
-      fflush(myInfo->fpMcecmd);
-    }
-  }
-}
-
-
-// =======sc2dalib_o*******
-//====================//
-
-/**
- * \fn void sc2dalib_openFiles(dasInfoStruct_t *myInfo,
- * int getData, int getBatch, StatusType *status)
- *
- * \brief function
- *  open all files, set myInfo->trkNo=0 if no cmdrepFile exits
- *
- * \param myInfo    dasInfo structure pointer
- * \param getData    int
- * \param getBatch   int
- * \param status    StatusType.  given and return
- *
- * getData=
- *   DATFILENOAPPEND,   // data file no appending
- *   DATFILEAPPEND,     //appending for data file
- *   NODATAFILE,
- * getBatch=
- *   NOBATCHFILE,
- *   BATCHFILE,          // it is batch
- *   OTHERFILE           // it is other file,i.e setup file
- *
- */
-/*+ sc2dalib_openFiles
-*/
-void sc2dalib_openFiles
-(
-dasInfoStruct_t *myInfo,       
-int             getData,
-int             getBatch,
-StatusType      *status
-)
-{
-  if (!StatusOkP(status)) return;
-
-  my_closeFiles(myInfo);
-
-  //filesvFlag !=1, don't save cmd-reply to fpMcecmd
-
-  jitDebug(8,
-      "sc2dalib_openFiles: cmdBuf to MCE and Reply from MCE stored in %s\n", 
-      myInfo->logfileName);
-
-  if ((myInfo->filesvFlag==1) || (myInfo->filesvFlag==5)) 
-  {
-    // if no file exists, *status=DITS__APP_ERROR
-    // reset the trkNo, otherwise, leave trkNo unchanged
-    sc2dalib_isFile(myInfo->cmdrepFile,status);
-    if ( !StatusOkP(status) )
-    {
-      myInfo->trkNo=0;   
-      *status=STATUS__OK;   
-    }
-    else
-      myInfo->trkNo++;
-       
-    if ((myInfo->fpMcecmd=fopen64(myInfo->cmdrepFile,"w")) == NULL)
-    {
-      *status = DITS__APP_ERROR;
-      ErsRep (0, status, "sc2dalib_openFiles:cmdrepFile failed to open %s",
-              myInfo->cmdrepFile);
-      return;
-    }
-    jitDebug(8,
-       "sc2dalib_openFiles: the CMD-REPLY results are also stored in %s\n",
-       myInfo->cmdrepFile);
-  }
-  else if (myInfo->actionFlag==SERVOACTION)
-  {
-    if((myInfo->fpMcecmd = fopen64(myInfo->cmdrepFile,"w")) == NULL)
-    {
-      *status = DITS__APP_ERROR;
-      ErsRep (0, status, "sc2dalib_openFiles:cmdrepFile 1  failed to open %s",
-              myInfo->cmdrepFile);
-      return;
-    }
-    jitDebug(16,
-       "sc2dalib_openFiles: the lockpoint results are also stored in %s\n",
-       myInfo->cmdrepFile);
-  }
-
-  if( myInfo->filesvFlag !=0 ) 
-  {
-    if ( getData !=NODATAFILE )
-    { 
-      if ( getData==DATFILEAPPEND ) 
-      {
-        // open another file for appending, mostly used for taking 
-        // frame data
-	if((myInfo->fpData = fopen64(myInfo->dataFile,"a")) == NULL )
-	  {
-	    *status = DITS__APP_ERROR;
-	    ErsRep (0, status, "sc2dalib_openFiles: Error- failed to open file %s", myInfo->dataFile); 
-	    return;
-	  }
-      }
-      else  //( getData==DATFILENOAPPEND ) 
-      {
-        // open another file, but no appending
-	if((myInfo->fpData = fopen64(myInfo->dataFile,"w")) == NULL )
-	  {
-	    *status = DITS__APP_ERROR;
-	    ErsRep (0, status, "sc2dalib_openFiles: Error- failed to open file %s", myInfo->dataFile); 
-	    return;
-	  }
-      }
-      if ( myInfo->fpData==NULL)
-      {
-        *status = DITS__APP_ERROR;
-        ErsRep(0,status,"sc2dalib_openFiles: dataFile failed to open %s",
-               myInfo->dataFile);
-        ErsRep(0,status, "sc2dalib_openFiles: %s",strerror(errno));
-        return;
-      }
-      jitDebug(8,"sc2dalib_openFiles: the data result stored in %s\n",
-              myInfo->dataFile);
-    }
-  }
-  // open another file for stripchart, do not append so file will not grow 
-  if(   ( (myInfo->actionFlag==SERVOACTION) && (myInfo->filesvFlag !=0 ) ) ||
-        ( (myInfo->actionFlag==TRKHEATACTION) && ( (myInfo->heatSlp.option & 0x01)!=0 ) ) ||
-        (myInfo->actionFlag==TRKSQ2FBACTION) 
-    )
-  {
-    if ((myInfo->fpStrchart=fopen64(myInfo->strchartFile,"w"))==NULL)
-    {
-      *status = DITS__APP_ERROR;
-      ErsRep(0,status,"sc2dalib_openFiles: strchartFile failed to open %s",
-             myInfo->strchartFile);
-      ErsRep(0,status, "sc2dalib_openFiles: %s",strerror(errno));
-      return;
-    }
-  }
-  
-  // open another file, for batch or setup
-  if(getBatch==BATCHFILE || getBatch==OTHERFILE)  
-  {
-   jitDebug(8,"sc2dalib_openFiles: the specified file:%s\n",
-              myInfo->batchFile);
-    if ((myInfo->fpBatch = fopen(myInfo->batchFile,"r")) == NULL)
-    {
-      jitDebug(8,"sc2dalib_openFiles: batchFile failed to open: %s\n",
-              myInfo->batchFile);     
-      *status=DITS__APP_ERROR;
-      ErsRep(0,status,"sc2dalib_openFiles: batchFile failed to open: %s\n",
-             myInfo->batchFile);
-      return;
-    }
-    jitDebug(8,"sc2dalib_openFiles: the batch or specified file:%s\n",
-             myInfo->batchFile);     
-  }
-} 
 
 
 // =======sc2dalib_p*******
@@ -5184,7 +3033,7 @@ StatusType            *status
   if (!StatusOkP(status)) return;
   
   // Update debug flag, in case it has changed 
-  sc2dalib_updateDebug(con,myInfo, status);
+  utils_update_debug(con,myInfo, status);
 
   // Do not continue if not initialized or in a data taking mode 
   SdpGeti("INITIALISED", &initialised, status);
@@ -5271,7 +3120,7 @@ StatusType            *status
   if (!StatusOkP(status)) return;
   
   // Update debug flag, in case it has changed 
-  sc2dalib_updateDebug(con,myInfo, status);
+  utils_update_debug(con,myInfo, status);
 
   SdpGeti("IN_SEQUENCE", &in_sequence, status);
   if(in_sequence != DA_MCE_NONE)
@@ -5426,11 +3275,10 @@ StatusType      *status
   sprintf(localmsg,
      "pcistatusRep:PCI(X:0)=%#lX (X:2)=%#lx PCI FrameCount(X:1)=%#lX(%ld)", 
       memValue[0], memValue[2], memValue[1], memValue[1]);
-  sc2dalib_msgprintSave(myInfo,localmsg,"",USE_MSGOUT,status);
+  utils_msg(myInfo,localmsg,"",USE_MSGOUT,status);
   return;
 }
   
-
 
 /**
  * \fn void  sc2dalib_pcisendCmd(SDSU_CONTEXT *con,char *cmd,
@@ -5625,7 +3473,7 @@ long            blkSize,
 char            *memType,
 StatusType      *status
 )
-{   	        
+{
   int             i, multiNo,remainNo;
   long            memAddr=0, *retVal, tmpVal=0;
   char            memTypeInt;
@@ -5683,7 +3531,7 @@ StatusType      *status
   sprintf(localmsg,
    " %ld Val read from %s:%#lX (for fiber-related CMD: only (16bit) in little Endian LSB MSB)",
          blkSize, memType,startAddr); 
-  sc2dalib_msgprintSave(myInfo,localmsg,"",USE_MSGOUT,status);
+  utils_msg(myInfo,localmsg,"",USE_MSGOUT,status);
   multiNo  =blkSize/16;
   remainNo =blkSize- multiNo*16;
   for (i=0;i<multiNo;i++)  
@@ -5697,7 +3545,7 @@ StatusType      *status
          retVal[i*16+12],retVal[i*16+13],retVal[i*16+14],retVal[i*16+15]);
  
     strcat(tmpData[0],tmpData[1]);
-    sc2dalib_msgprintSave(myInfo,tmpData[0],"",USE_MSGOUT,status);
+    utils_msg(myInfo,tmpData[0],"",USE_MSGOUT,status);
   }
   if(remainNo !=0)
   {
@@ -5706,7 +3554,7 @@ StatusType      *status
       sprintf(remainData,"%s %06lX", remainData1,retVal[multiNo*16+i]);
       strcpy(remainData1,remainData);
     } 
-    sc2dalib_msgprintSave(myInfo,remainData,"",USE_MSGOUT,status);
+    utils_msg(myInfo,remainData,"",USE_MSGOUT,status);
   }
 }
 
@@ -5749,7 +3597,7 @@ StatusType            *status
   if (*status != STATUS__OK) return;
 
   // Update debug flag, in case it has changed 
-  sc2dalib_updateDebug(con,myInfo, status);
+  utils_update_debug(con,myInfo, status);
 
   SdpGeti("CONFIGURED", &configured, status);
   if (configured==0 )
@@ -5813,10 +3661,10 @@ StatusType            *status
 
   // open datafile "a" for stripchart to look, 
   // open otherfile "r" for setup
-  sc2dalib_openFiles(myInfo,DATFILEAPPEND,OTHERFILE,status);
+  utils_open_files(myInfo,DATFILEAPPEND,OTHERFILE,status);
   if ( !StatusOkP(status) )
   {
-    ErsRep(0,status,"sc2dalib_pixelmonInit: sc2dalib_openFiles failed"); 
+    ErsRep(0,status,"sc2dalib_pixelmonInit: utils_open_files failed"); 
     return;
   }
   // use this to read pixel monitor setting
@@ -5857,154 +3705,8 @@ StatusType            *status
 }
 
 
-
 // =======sc2dalib_r*******
 //====================//
-
-/**
- * \fn void sc2dalib_readframeRate(SDSU_CONTEXT *con, dasInfoStruct_t *myInfo,
- *  struct mcexml_struct *mceinxPtr, long *rate, 
- *  StatusType *status)
- *
- * \brief function: 
- *  read back MCE parameters Val and calculate frame rate 
- *
- * \param con       SDSU context structure pointer
- * \param myInfo   dasInfoStruct_t poiter
- * \param mceinxPtr  mcexml_struct pointer
- * \param rate       long pointer for frame rate
- * \param status    StatusType pointer.  given and return
- *
- * if  *status != STATUS__OK, report error.
- */
-/*+ sc2dalib_readframeRate
-*/
-void sc2dalib_readframeRate
-(
-SDSU_CONTEXT          *con,
-dasInfoStruct_t       *myInfo,
-struct mcexml_struct  *mceinxPtr,
-long                   *rate,
-StatusType            *status
-)
-{
-  if (*status != STATUS__OK) return;
-
-  int dataRate; 
-#ifndef NOTUSE_MCE
-  // 12 Dec 2006 X.Gao
-  // MCE firmware only allows rb rc1, rc2 rcs,  not rb sys
-  char  rowlengthCmd[]="rb sys row_len 1 ";
-  char    numrowCmd[] ="rb sys num_rows 1 ";
-  char  datarateCmd[] ="rb cc  data_rate 1";
-  char  fbJumpCmd[] ="rb rcs en_fb_jump 1";
-
-  sc2dalib_readmceVal(con,myInfo,mceinxPtr,rowlengthCmd,&myInfo->rowLength,1,status);
-  if (!StatusOkP(status)) 
-    return;
-
-  sc2dalib_readmceVal(con,myInfo,mceinxPtr,numrowCmd,&myInfo->numRows,1,status);
-  if (!StatusOkP(status)) 
-    return;
-
-  sc2dalib_readmceVal(con,myInfo,mceinxPtr,datarateCmd,&dataRate,1,status);
-  if (!StatusOkP(status)) 
-    return;
-
-  sc2dalib_readmceVal(con,myInfo,mceinxPtr,fbJumpCmd,&myInfo->en_fb_jump,1,status);
-  if (!StatusOkP(status)) 
-    return;
-
-  *rate= (float)50000000/(myInfo->rowLength*myInfo->numRows*dataRate)+0.5;
-  jitDebug(2,"=============================\n");
-  jitDebug(2,"MCE's rowLength(=%d) numRows(=%d),dataRate(=%d)\n",
-            myInfo->rowLength, myInfo->numRows, dataRate);
-  jitDebug(2,"The calculated frameRate =%ld Hz\n",*rate); 
-  jitDebug(2,"============================\n");
-#else
-  myInfo->rowLength=128;
-  myInfo->numRows=41;
-  *rate=200;
-#endif
-}
-
-
-/**
- * \fn void sc2dalib_readmceVal(SDSU_CONTEXT *con, dasInfoStruct_t *myInfo,
- *  struct mcexml_struct *mceinxPtr, char *cmd,  int *val, int howMany,
- *  StatusType *status)
- *
- * \brief function: 
- *  read back MCE parameters Val 
- *
- * \param con       SDSU context structure pointer
- * \param myInfo   dasInfoStruct_t poiter
- * \param mceinxPtr  mcexml_struct pointer
- * \param cmd        char pointer for command
- * \param  val      int pointer for returned Val 
- * \param howMany      int howmany to return 
- * \param status    StatusType pointer.  given and return
- *
- * if  *status != STATUS__OK, report error.
- */
-/*+ sc2dalib_readmceVal
-*/
-void sc2dalib_readmceVal
-(
-SDSU_CONTEXT          *con,      
-dasInfoStruct_t       *myInfo,
-struct mcexml_struct  *mceinxPtr,
-char                  *cmd,
-int                   *val,
-int                   howMany,
-StatusType            *status
-)
-{
-  int           i;
-  char         errmsg[FILE_LEN];
-  dasCmdInfo_t  mycmdInfo;
-
-  if (*status != STATUS__OK) return;
-
-  mycmdInfo.cmdBufSize=MCEBLK_SIZE;
-  strcpy(mycmdInfo.mceCmd,cmd);  
-  mcexml_translate(mycmdInfo.mceCmd, mceinxPtr,mycmdInfo.cmdBufSize,
-                          mycmdInfo.cmdBuf,status);
-  if ( *status ==DITS__APP_ERROR)
-  {
-    sprintf(errmsg,"sc2dalib_readmceVal: failed to call mcexml_translate");  
-    ErsRep (0, status, errmsg);
-    return;
-  }
-  if( (*status=sdsu_command_mce (con,mycmdInfo.cmdBuf,&mycmdInfo.reply)) <0)
-  { 
-     strcpy(mycmdInfo.mceCmd,cmd);
-     sc2dalib_mceerrRep(myInfo,&mycmdInfo,status); 
-     sprintf(errmsg,"sc2dalib_readmceVal: failed to call sdsu_command_mce");
-     ErsRep (0, status, errmsg);
-     return;
-  }
-  if( mycmdInfo.reply.status == MCE_RBOK )
-  {
-    if ( howMany==1) 
-      *val=(int)mycmdInfo.reply.data[1];
-    else
-    {
-      for (i=0; i<howMany; i++)
-        val[i]=(int)mycmdInfo.reply.data[i+1];
-    }
-  }
-  else
-  {
-    *status=DITS__APP_ERROR;
-    sprintf(errmsg,"sc2dalib_readmceVal: MCE reply(%#0lx) != RBOK",
-            mycmdInfo.reply.status );  
-    ErsRep (0, status, errmsg);
-    return;
-  }    
-}
-
-
 /**
  * \fn void sc2dalib_readpixelMask(dasInfoStruct_t *myInfo, 
  *  int *pixelMask, SdsIdType maskId, StatusType *status)
@@ -6109,62 +3811,6 @@ StatusType        *status
   jitDebug (2,"sc2dalib_readpixelMask: get rowCount=%d\n",j);
   SdsFreeId ( rowId, status );
   SdsFreeId ( pixelmaskId, status );
-}
-
-
-
-// =======sc2dalib_u*******
-//====================//
-
-/**
- * \fn void sc2dalib_updateDebug(SDSU_CONTEXT *con, dasInfoStruct_t  *myInfo, 
-    StatusType *status)
- *
- * \brief function
- *  get DEBUG parameter and update debug level 
- *
- * \param con     SDSU_CONTEXT pointer 
- * \param myInfo dasInfoStruct_t pointer
- * \param status  StatusType pointer.  given and return
- *
- * debuglvl:bit  7-0   for DAS
- * debuglvl:bit  15-8   for DATAHANDLE
- * debuglvl:bit  23-16   for INTERFACE
- * debuglvl:bit 31-24  for DRIVER
- *
- * debug level: 
- *  NO_GEN_MSG=0,  diplay very limited message, no filenames
- *  DISP_GEN_MSG=1,  display general message, no filenames
- *  DISP_FILE_MSG=3, display only filenames
- *  the followings are not used currently
- *  DATA_BEG_MSG=2,  display part of the beg. of data ,no filenames
- *  DISP_GEN2_MSG=4,  disply special message
- *  DISP_MCETASK=5,  disply general message in mce task
- *  DISP_PCITASK=6, disply general message in pci task
- *  DISP_DATATASK=7, disply general message in data task
- *
- */
-
-/*+ sc2dalib_updateDebug 
-*/
-void sc2dalib_updateDebug
-(
-SDSU_CONTEXT    *con,
-dasInfoStruct_t *myInfo,
-StatusType      *status    
-)
-{
-  long debuglvl;
-  
-  if (!StatusOkP(status)) return;
-
-  SdpGeti("DEBUG", &debuglvl, status);
-  //printf("debugLvl=%ld\n",debuglvl);
-  con->process.debuglvl[DAS]       =(char)((debuglvl    )& 0x000000FF);
-  con->process.debuglvl[DATAHANDLE]=(char)((debuglvl>> 8)& 0x000000FF);
-  con->process.debuglvl[INTERFACE] =(char)((debuglvl>> 16)& 0x000000FF);
-  con->process.debuglvl[DRIVER]    =(char)((debuglvl>> 24)& 0x000000FF);
-  myInfo->debuglvl=(long)con->process.debuglvl[DAS];
 }
 
 
@@ -6321,94 +3967,6 @@ StatusType      *status
 }
 
 
-
-/**
- * \fn void sc2dalib_savecmdBuf(FILE *fpout,int mxbuf,char buffer[mxbuf])
- *
- * \brief functaion
- *  save command buffer into a file
- *
- * \param fpout    FILE pointer for store the cmdBuf sent out 
- * \param mxbuf    int the buffer size
- * \param buffer[] char array for the command buffer
- */
-/*+ sc2dalib_savecmdBuf - save command buffer into a file
-*/
-void sc2dalib_savecmdBuf
-(
-FILE *fpout,          
-int   mxbuf,
-char  buffer[mxbuf]  
-)
-{
-   int *longword;
-   int  j,l,toploop,midloop,remain;
-
-   midloop=8; mxbuf /=4;
-   toploop=(mxbuf)/midloop;
-   remain =(mxbuf)%midloop;
-   longword = (int *)buffer;
-
-   for (j=0;j<toploop;j++)
-   {
-      for(l=0;l<midloop;l++)
-         fprintf(fpout,"%08X ",*(longword+ l+midloop*j) );
-      fprintf(fpout,"\n");
-   }
-   toploop =toploop*midloop;
-   for(l=0;l<remain;l++)
-      fprintf(fpout,"%08X ", *(longword+ l+ toploop) );
-   if(remain)
-      fprintf(fpout,"\n");
-}
-
-
-/**
- * \fn void sc2dalib_savemceReply(FILE *fpout,int mxbuf,char * byte,
- *   uint32 count)
- *
- * \brief function
- *  save MCE reply into a file
- *
- * \param fpout  FILE pointer for store the reply 
- * \param mxbuf  int: the buffer size in 32bits
- * \param byte   pointer to the reply buffer
- * \param count  the count_th repy since dasDrama starts
- *
- */
-/*+ sc2dalib_savemceReply -save MCE reply into a file
-*/
-void sc2dalib_savemceReply
-(
-FILE *fpout,    //store the cmdBuf sent to PCI, in byte order  
-int   mxbuf,
-char  *byte,    // pointer to reply Buffer 
-uint32 count    // the count_Th reply 
-)
-{
-  int   *longword;
-  int   j,l,toploop,midloop, remain;
-
-  midloop=8;
-  toploop=(mxbuf)/midloop;
-  remain =(mxbuf)%midloop;
-  longword = (int *)byte;
- 
-  fprintf(fpout,"CMD(%ld)'s reply is here \n",count);
-  for (j=0;j<toploop;j++)
-  {
-    for(l=0;l<midloop;l++)
-      fprintf(fpout,"%08X ",*(longword+ l+midloop*j) );
-    fprintf(fpout,"\n");
-  }
-  toploop =toploop*midloop;
-  for(l=0;l<remain;l++)
-    fprintf(fpout,"%08X ", *(longword+ l+ toploop) );
-  if(remain)
-    fprintf(fpout,"\n");
-}
-
-
 /**
  * \fn void sc2dalib_savemcerepData(dasInfoStruct_t *myInfo, FILE *fpout,
  *  int mxbuf, char * byte)
@@ -6444,115 +4002,6 @@ char             *byte    // pointer to reply Buffer
     fprintf(fpout,"%08d ",*(longword+2 + j ) );
   fprintf(fpout,"\n");
 }
-
-
-/**
- * \fn void sc2dalib_savemceRepToHash(dasInfoStruct_t *myInfo, FILE *fpout,
- *  int mxbuf, char * byte, char *mycmd)
- *
- * \brief function
- *  save the MCE reply data into a file and put it into an AST hash
- *
- * \param myInfo     dasInfoStruct_t pointer
- * \param fpout      FILE pointer of file where to store the reply 
- * \param mxbuf      int: the buffer size in 32bits
- * \param byte       pointer to the reply buffer
- * \param mycmd      Pointer to the actual command
- *
- */
-/*+ sc2dalib_savemcerepData 
-*/
-void sc2dalib_saveMceRepToHash
-(
-dasInfoStruct_t  *myInfo,
-FILE             *fpout,      // file pointer where to store the replied data  
-int              mxbuf,       // How many words came back from the MCE
-char             *byte,       // Pointer to reply Buffer
-char            *mycmd       // Pointer to command which caused the data
-)
-{
-  int   *longword;
-  int   j, expected;
-  char *myPntr;
-  char delim[6];
-  char myBuff[80];
-  char card[8];
-  char cmd[30];
-  static AstKeyMap *theMap;
-  char key[40];
-  int values[50];
-  int status;
-  int lenCmd, lenPossible;
-
-  /* myInfo->astMapState will be 0 the first time this routine is called,
-     1 on all subsequent calls except when we are done then it will be 2 */
-  if(myInfo->astMapState == 0)
-    {
-      theMap = NULL;
-      theMap = astKeyMap(" ");
-    }
-
-  else if(myInfo->astMapState == 2)
-    {
-
-      /* Write map out to a file called astKeyMapFile */
-      status = SAI__OK;
-      sprintf(myBuff,"%s/astKeyMapFile", getenv ("SC2SCRATCH"));
-      atlShow((AstObject *)theMap, myBuff, "", &status );
-
-      astAnnul(theMap);
-
-      return;
-    }
-
-  /* Until the very end we want the state equal to 1 */
-  myInfo->astMapState = 1;
-
-  /* The command will be something like this:rb bc2 bias 1
-     Where the second thing (bc2) is the card number and the
-     third thing is the command and the fourth thing is how
-     many words I was expecting to get back, so parse it */
-  delim[0] = ' ';
-  delim[1] = 0;
-  myBuff[18]=0;
-  strncpy(myBuff, mycmd, 40);
-  myPntr = strtok(myBuff, delim); /* This should be pointing at the rb */
-  myPntr = strtok(NULL, delim);   /* The card number */
-  strncpy(card,myPntr,8);
-  myPntr = strtok(NULL, delim);   /* The command itself */
-  strncpy(cmd,myPntr,20);
-  myPntr = strtok(NULL, delim);   /* The number I was expecting */
-  expected = atoi(myPntr);
-
-  /* Chop the end off the command so that it plus the card string, plus one <= 15 characters */
-  lenPossible = 14 - strlen(card);
-  lenCmd = strlen(cmd);
-  if(lenCmd > lenPossible) cmd[lenPossible-1] = 0;
-  
-  fprintf(fpout,"%s_%s:  ",card, cmd);
-
-  if(expected > (mxbuf-3)) expected = mxbuf-3;
-
-  // we do not want the first two RBOK and CardId_paraId
-  // and last chksum
-
-  longword = (int *)byte;
-
-  for (j=0; j<expected; j++)
-    {
-      fprintf(fpout,"%8d ",*(longword+2 + j ) );
-      values[j] = *(longword+2 + j );
-    }
-  fprintf(fpout,"\n");
-
-  /* build up key word and add to key map */
-  strcpy(key,cmd);
-  strcat(key,"_");
-  strcat(key,card);
-  astMapPut1I(theMap, key, expected, values, " ");
-
-}
-
 
 
 /**
@@ -6615,10 +4064,10 @@ StatusType            *status
   else
   {
     jitDebug(2,"sc2dalib_sendCmd:(%s)\n",mycmdInfo->mceCmd);
-    sc2dalib_Cmd(con,myInfo,mycmdInfo,dateTime,status);  
+    mce_cmd(con,myInfo,mycmdInfo,dateTime,status);  
     if ( *status ==DITS__APP_ERROR)
     {     
-      ErsRep (0, status,"sc2dalib_sendCmd: failed to call sc2dalib_Cmd");
+      ErsRep (0, status,"sc2dalib_sendCmd: failed to call mce_cmd");
       return;
     }
     if(myInfo->debuglvl==DISP_GEN_MSG)     
@@ -6629,60 +4078,6 @@ StatusType            *status
     }
   }
 }
-
-
-/**
- * \fn void sc2dalib_setmceVal(SDSU_CONTEXT *con, dasInfoStruct_t *myInfo,
- *  struct mcexml_struct *mceinxPtr, char *cmd,  StatusType *status)
- *
- * \brief function: 
- *  set MCE parameters Val 
- *
- * \param con       SDSU context structure pointer
- * \param myInfo   dasInfoStruct_t poiter
- * \param mceinxPtr  mcexml_struct pointer
- * \param cmd        char pointer for command
- * \param status    StatusType pointer.  given and return
- *
- * if  *status != STATUS__OK, report error.
- */
-/*+ sc2dalib_setmceVal
-*/
-void sc2dalib_setmceVal
-(
-SDSU_CONTEXT          *con,      
-dasInfoStruct_t       *myInfo,
-struct mcexml_struct  *mceinxPtr,
-char                  *cmd,
-StatusType            *status
-)
-{
-  char         errmsg[FILE_LEN];
-  dasCmdInfo_t mycmdInfo; 
-
-  if(*status != STATUS__OK) return;
-
-  mycmdInfo.cmdBufSize=MCEBLK_SIZE;
-  strcpy(mycmdInfo.mceCmd,cmd);  
-  mcexml_translate(mycmdInfo.mceCmd, mceinxPtr,mycmdInfo.cmdBufSize,
-                          mycmdInfo.cmdBuf,status);
-  if ( *status != STATUS__OK)
-  {
-    sprintf(errmsg,
-         "sc2dalib_setmceVal: mcexml_translate returned with bad status");  
-    ErsRep (0, status, errmsg);
-    return;
-  }
-  if( (*status=sdsu_command_mce (con,mycmdInfo.cmdBuf,&mycmdInfo.reply)) < 0)
-  { 
-     strcpy(mycmdInfo.mceCmd,cmd);
-     sc2dalib_mceerrRep(myInfo,&mycmdInfo,status); 
-     sprintf(errmsg,"sc2dalib_setmceVal: sdsu_command_mce returned bad status");
-     ErsRep (0, status, errmsg);
-     return;
-  }
-}
-
 
 
 /**
@@ -6711,18 +4106,14 @@ StatusType            *status
 )
 {
   char  mceCard[FILE_LEN];
-  
   long  configured, in_sequence;
   SdsIdType    argId;
-
-#ifndef NOTUSE_MCE
   long     frameRate; 
-#endif
 
   if (*status != STATUS__OK) return;
  
   // Update debug flag, in case it has changed 
-  sc2dalib_updateDebug(con,myInfo, status);
+  utils_update_debug(con,myInfo, status);
 
   // Do not continue if not initialized, not configured or in data
   // takeing mode 
@@ -6803,16 +4194,14 @@ StatusType            *status
     return;
   }
 
-#ifndef NOTUSE_MCE
-  sc2dalib_readframeRate(con,myInfo,mceInxpt,&frameRate,status);
+  mce_read_frame_rate(con,myInfo,mceInxpt,&frameRate,status);
   if (!StatusOkP(status)) 
   {
-    ErsRep(0,status,"sc2dalib_setseqInit failed to call sc2dalib_readframeRate");
+    ErsRep(0,status,"sc2dalib_setseqInit failed to call mce_read_frame_rate");
     return;
 
   }
   SdpPuti("FRAME_RATE", frameRate, status);
-#endif
 
   fprintf(myInfo->fpLog,"\n<%s> CMD for sc2dalib__SetSeq \n",dateTime);
   /* fprintf(myInfo->fpLog,"FFRAME_FILENAME <%s> MCE_WHICHCARD <%s>\n",
@@ -6868,7 +4257,6 @@ StatusType            *status
   // pass on to DH task
   myInfo->parshmPtr->sq2fbparaFlag=(int)svflag;
 }
-
 
 
 /**
@@ -6989,7 +4377,7 @@ StatusType            *status
               myInfo->pixelHeat, myInfo->bbHeat, myInfo->shutterFraction);
 
   // Handle initialization of heater control
-  sc2dalib_initHeatBiasHandling(con, myInfo, mceInxpt, &sawtoothRampFlag, status);
+  heat_init_bias(con, myInfo, mceInxpt, &sawtoothRampFlag, status);
   if (!StatusOkP(status)) 
     return;
   // pass on to DH task
@@ -6998,10 +4386,10 @@ StatusType            *status
   myInfo->parshmPtr->stairWidth = myInfo->stairWidth;
 
   // read the data_mode setting from the MCE
-  sc2dalib_readmceVal(con,myInfo,mceInxpt, datamodeVal, &myInfo->datamode,1,status);
+  mce_read(con,myInfo,mceInxpt, datamodeVal, &myInfo->datamode,1,status);
   if (!StatusOkP(status)) 
     {
-      ErsRep(0,status, "sc2dalib_setseqInitRTSC: sc2dalib_readmceVal failed to read data_mode"); 
+      ErsRep(0,status, "sc2dalib_setseqInitRTSC: mce_read failed to read data_mode"); 
       return;
     }
 
@@ -7102,7 +4490,6 @@ StatusType       *status
    {
       strcat(inBeamArray, "shutter ");
     }
-
 }
 
 
@@ -7141,9 +4528,9 @@ StatusType            *status
 
   if (!StatusOkP(status)) return;
 
-  jitDebug(2,"sc2dalib_seqInit: call sc2dalib_updateDebug\n");  
+  jitDebug(2,"sc2dalib_seqInit: call utils_update_debug\n");  
   // Update debug flag, in case it has changed 
-  sc2dalib_updateDebug(con,myInfo, status);
+  utils_update_debug(con,myInfo, status);
   SdpGeti("SETUP", &setup, status);
   if(setup == 0)
   {
@@ -7185,7 +4572,7 @@ StatusType            *status
   fprintf(myInfo->fpLog,"SEQ_START <%ld> SEQ_END <%ld> DWELL <%ld>\n",
           startSeq, endSeq, dWell);
 	  
-  jitDebug(2,"sc2dalib_seqInit: call sca2daallctsharedMem\n");
+  jitDebug(2,"sc2dalib_seqInit: call utils_alloc_memory\n");
 
   /* Calculate the number of stair steps that will be taken if this is a 
      fast flat field SEQUENCE. Protect against stairWidth being = zero */
@@ -7195,10 +4582,10 @@ StatusType            *status
 
   // allocate shared memory (dasdrama<=> dhtask) here. 
   // since we know how big it is now
-  sc2dalib_allctsharedMem(con,myInfo,startSeq,endSeq,status);
+  utils_alloc_memory(con, myInfo, startSeq, endSeq, status);
   if (!StatusOkP(status)) 
     return;
-  jitDebug(2,"sc2dalib_seqInit: sca2daallctsharedMem ok\n");
+  jitDebug(2,"sc2dalib_seqInit: utils_alloc_memory OK\n");
 
   // initial the ith seqNum for checking parameter
   myInfo->firstQLFlag=1;
@@ -7248,7 +4635,7 @@ StatusType            *status
 {
   if (!StatusOkP(status)) return;
   jitDebug(2,
-"sc2dalib_seqcallsc2headmanseqStart: call sc2headman_seqstart startSeq(%d) EndSeq(%d)\n",
+  "sc2dalib_seqcallsc2headmanseqStart: call sc2headman_seqstart startSeq(%d) EndSeq(%d)\n",
      (int)startSeq, (int)endSeq); 
   sc2headman_seqstart((int)startSeq, (int)endSeq,myInfo->jcmtheadEntry, status);
   if ( !StatusOkP(status) )
@@ -7686,31 +5073,31 @@ StatusType            *status
 
 
   /* If not in RTS mode do not do anything with the QL structure */
-
   if ( myInfo->parshmPtr->engFlag==RTSC_MODE)
-    {
-      if(obsMode != OBS_SCAN && (myInfo->parshmPtr->load != LOAD_DARK) )
-	{
-	  jitDebug(8,
+  {
+    if(obsMode != OBS_SCAN && (myInfo->parshmPtr->load != LOAD_DARK) )
+  	{
+  	  jitDebug(8,
          "sc2dalib_seqsendQL: call sc2headman_qlhead startSeq (%d) endSeq(%d)\n",
-		   (int)seqStart, (int)endsubSeq);
+  		   (int)seqStart, (int)endsubSeq);
 
-	  sc2headman_qlhead(myInfo->parshmPtr->subscanNo,(int)seqStart,(int)endsubSeq, 
-			    myInfo->utcshort, MAXFITS, &actfits, myInfo->parshmPtr->fitshd, status);
-	  if ( !StatusOkP(status) )
+  	  sc2headman_qlhead(myInfo->parshmPtr->subscanNo,(int)seqStart,
+                        (int)endsubSeq, myInfo->utcshort, MAXFITS, &actfits,
+                        myInfo->parshmPtr->fitshd, status);
+  	  if ( !StatusOkP(status) )
 	    {
 	      ErsRep(0,status,"sc2dalib_seqsendQL: call sc2headman_qlHead failed"); 
 	      return;
 	    } 
-	}
-
+  	}
 
 	  fitsDim[1]=actfits;  
-	  sc2dalib_updateQLSDS(con, myInfo,ithcoaddnumPtr,timePtr, 
-			       myInfo->parshmPtr->fitshd,fitsDim,dataPtr,dataDim,scanfileName,status);
+	  utils_update_QLSDS(con, myInfo, ithcoaddnumPtr, timePtr,
+                       myInfo->parshmPtr->fitshd, fitsDim, dataPtr,
+                       dataDim, scanfileName, status);
 	  if (!StatusOkP(status))
 	    return;
-    }
+  }
 
   // just put a value for lookup flag table, increase qlNum
   *ithlkupflagPtr= QL_DONE;
@@ -7765,14 +5152,14 @@ StatusType            *status
   fprintf (myInfo->fpLog,"%s",asctime(localtime(&tm)) );
 
   // use 0 MsgOut,3  printf; 4 no print at all, all save to log
-  sc2dalib_msgprintSave(myInfo,"sc2dalib_seqchkEnd: %s",
+  utils_msg(myInfo,"sc2dalib_seqchkEnd: %s",
                     dramamsg->endMsg,NO_PRINT,status);
  
   if (dramamsg->reason !=FRAME_COMPLETION)
   {
     if(dramamsg->reason==FRAME_STOPPED)
     {
-      sc2dalib_msgprintSave(myInfo,
+      utils_msg(myInfo,
         "sc2dalib_seqchkEnd: the action is stopped by kick","",USE_MSGOUT,status);
       con->process.seqstatus=SEQ_STOPPED;
     }
@@ -7781,31 +5168,31 @@ StatusType            *status
       *status=DITS__APP_ERROR;
       con->process.seqstatus=SEQ_ERROR;    
 
-      sc2dalib_msgprintSave(myInfo,"sc2dalib_seqchkEnd: -----ERROR-------------",
+      utils_msg(myInfo,"sc2dalib_seqchkEnd: -----ERROR-------------",
                         "",USE_ERSREP,status); 
       if (dramamsg->reason==FRAME_ERRGETPASSBUF)
       {         
-        sc2dalib_msgprintSave(myInfo," Ended with waiting data buffer TIMEOUT",
+        utils_msg(myInfo," Ended with waiting data buffer TIMEOUT",
                           "",USE_ERSREP,status);
       }
       else if (dramamsg->reason==FRAME_MISSING)
       {  
-        sc2dalib_msgprintSave(myInfo," Ended with less frames then asked",
+        utils_msg(myInfo," Ended with less frames then asked",
                           "",USE_ERSREP,status);
       }
       else if (dramamsg->reason==FRAME_MORE)
       {  
-        sc2dalib_msgprintSave(myInfo, 
+        utils_msg(myInfo, 
           "either corrupted frame status or too many frames","",USE_ERSREP,status);
       }
       else if (dramamsg->reason==FRAME_MALLOCFAILED)
       {  
-        sc2dalib_msgprintSave(myInfo," %s",dramamsg->errRep,USE_ERSREP,status); 
+        utils_msg(myInfo," %s",dramamsg->errRep,USE_ERSREP,status); 
       }
       else 
       {
-       sc2dalib_msgprintSave(myInfo," reason unknown or","",USE_ERSREP,status);
-       sc2dalib_msgprintSave(myInfo," %s",dramamsg->errRep,USE_ERSREP,status);
+       utils_msg(myInfo," reason unknown or","",USE_ERSREP,status);
+       utils_msg(myInfo," %s",dramamsg->errRep,USE_ERSREP,status);
       }
     }
     // in case of error, need to unblock dh task, but not wait for 
@@ -7853,325 +5240,9 @@ StatusType      *status
   if (myInfo->engFlag==RTSC_MODE)
     sc2headman_endseq(status);
 
-  sc2dalib_closesharedMem(myInfo,SHAREDM_OBS,status);
+  utils_close_memory(myInfo,SHAREDM_OBS,status);
   sc2dalib_endAction(con,myInfo,status);
   *status=inStatus;
-}
-
-
-/**
- * \fn void sc2dalib_setsharedMem(SDSU_CONTEXT    *con,                    
- *  dasInfoStruct_t *myInfo, int whichShared, int sharedmemSize,
- *   StatusType *status)
- *
- * \brief function
- *  get shared memory 
- *
- * \param con         SDSU context structure
- * \param myInfo     dasInfo structure pointer 
- * \param whichShared  int 
- * \param sharedmemSize int 
- * \param status      StatusType pointer
- * 
- */
-/*+ sc2dalib_setsharedMem
-*/
-void sc2dalib_setsharedMem
-(                  
-SDSU_CONTEXT    *con,
-dasInfoStruct_t *myInfo,
-int             whichShared,
-int             sharedmemSize,  
-StatusType      *status
-)
-{
-  int   key;
-  int   sharedmId;
-  char *sharedmPtr;
-  char  whichName[30];
-
-  if (*status != STATUS__OK) return;
-
-  errno=0;
-  if ( whichShared==SHAREDM_PAR)
-  {
-    key = ftok(PAR_SHARED1, PAR_SHARED2);   // Get a key 
-    strcpy(whichName,"PAR");
-  }
-  else
-  {
-    key = ftok(OBS_SHARED1, OBS_SHARED2);   // Get a key 
-    strcpy(whichName,"OBS");
-  }
-  if (key ==(key_t)-1 )
-  {
-    *status=DITS__APP_ERROR;
-    ErsRep(0,status,"sc2dalib_setsharedMem:failed to get key ");
-    con->process.reason=FRAME_MALLOCFAILED;
-    return;
-  }
-  jitDebug(2,"sc2dalib_setsharedMem: (%s)  shareMemSize=%d byte\n",
-         whichName,sharedmemSize);
-
-  // if a shared-memory segment exists, get it; otherwise, create one 
-  sharedmId = shmget(key, sharedmemSize, 0666 | IPC_CREAT);
-  if ( sharedmId < 0)
-  {
-    *status=DITS__APP_ERROR;
-    ErsRep(0,status,"sc2dalib_setsharedMem:failed to get shared memory");
-    ErsRep(0,status,"sc2dalib_setsharedMem: request MemSize(%f)M   SHMMAX=(?M)",
-               (double)sharedmemSize/(1024*1024));
-    return;
-  }
-  //printf("sc2dalib_setsharedMem: pass shmget\n");
-  if ( whichShared==SHAREDM_PAR)
-    myInfo->sharedmparId=sharedmId;
-  else
-    myInfo->sharedmId=sharedmId;
-
-  // Attach segment to process. Use an attach address of zero to
-  // let the system find a correct virtual address to attach.
-  sharedmPtr= shmat(sharedmId, 0, 0644);
-  if (sharedmPtr == (char *) -1)
-  {
-    *status=DITS__APP_ERROR;
-    ErsRep(0,status,"sc2dalib_setsharedMem:failed to attach to shared memory");
-    con->process.reason=FRAME_MALLOCFAILED;
-    return;
-  }
-  //printf("sc2dalib_setsharedMem: pass shmat\n");
-  // this shall set initial value for the shared memory
-  memset(sharedmPtr, '0', sharedmemSize);
-
-  if ( whichShared==SHAREDM_PAR)
-  {  
-     myInfo->parShm=sharedmPtr;    
-     myInfo->parshmPtr=(PAR_SHARED *)myInfo->parShm;
-  }
-  else
-    myInfo->sharedShm=sharedmPtr;
-}
-
-/**
- * \fn void sc2dalib_stepHeaterCurrent(SDSU_CONTEXT *con, dasInfoStruct_t *myInfo, 
- *  struct mcexml_struct  *mceInxpt, StatusType *status)
- *
- * \brief function
- *  Check to see if it is a heater sawtooth or a heater ramp
- *  Based on which (half or quarter) cycle we are in change the heater current 
- *  D/A setting by +/- stairHeightCnts
- *
- *
- * \param con          SDSU context structure
- * \param myInfo       dasInfo structure pointer
- * \param mceInxpt     mcexml_struct pointer for parameter lookup table   
- * \param status       StatusType     
- *
- */
-/*+ sc2dalib_stepHeaterCurrent
-*/
-void sc2dalib_stepHeaterCurrent
-(
-SDSU_CONTEXT          *con,      
-dasInfoStruct_t       *myInfo,
-struct mcexml_struct  *mceInxpt,   
-StatusType            *status
-)
-{
-
-  char       heatCmd[FILE_LEN];
-  int        currentSet;
-
-  if (*status != STATUS__OK) return;
-
-  currentSet = myInfo->stairPresentValue;
-
-  myInfo->stairNumCount += 1;
-  stairCounter += 1;
-
-  /* Do not do the very last step of the SEQUENCE */
-  if(stairCounter == totalStairCount) return;
-
-  /* Is it a Heater sawtooth (fast flat field) */
-  if( (myInfo->drcontrol & FLATFIELD_BIT) != 0)
-    {
-
-      if((myInfo->stairQCycleCount == 0) || (myInfo->stairQCycleCount == 3))
-	{
-	  currentSet += myInfo->stairHeightCnts;
-	}
-      else
-	{
-	  currentSet -= myInfo->stairHeightCnts;
-	}
-
-      if(myInfo->stairNumCount >=  myInfo->stairNum)
-	{
-	  myInfo->stairNumCount = 0;
-	  myInfo->stairQCycleCount += 1;
-	  if(myInfo->stairQCycleCount >= 4)
-	    {
-	      myInfo->stairQCycleCount = 0;
-	    }
-	}
-    }
-
-  /* Or is it a Heater ramp */
-  if( (myInfo->drcontrol & HEATRAMP_BIT) != 0)
-    {
-
-      if(myInfo->stairHCycleCount == 0)
-	{
-	  currentSet -= myInfo->stairHeightCnts;
-	}
-      else
-	{
-	  currentSet += myInfo->stairHeightCnts;
-	}
-
-      if(myInfo->stairNumCount >=  myInfo->stairNum)
-	{
-	  myInfo->stairNumCount = 0;
-	  myInfo->stairHCycleCount += 1;
-
-	  if(myInfo->stairHCycleCount == 1)
-	    {
-	      currentSet += myInfo->stairHeightCnts;
-	    }
-	  else
-	    {
-	      currentSet -= myInfo->stairHeightCnts;
-	      myInfo->stairHCycleCount = 0;
-	    }
-	}
-
-    }
-
-  /* Now set the heater current to this value */
-
-  myInfo->stairPresentValue = currentSet;
-  sprintf(heatCmd, "wb bc1 bias %d", currentSet);
-  /* fprintf(myInfo->fpLog,"_stepHeaterCurrent %s\n",heatCmd); */
-
-  // send cmd and get reply
-  sc2dalib_setmceVal(con, myInfo, mceInxpt, heatCmd, status); 
-  if ( !StatusOkP(status) )
-    {
-      /* ErsRep(0,status,"sc2dalib_stepHeaterCurrent: sc2dalib_setmceval(1) %s failed",heatCmd); */ 
-      return;
-    }
-		 
-}
-
-/**
- * \fn void sc2dalib_stepTESBias(SDSU_CONTEXT *con, dasInfoStruct_t *myInfo, 
- *  struct mcexml_struct  *mceInxpt, StatusType *status)
- *
- * \brief function
- *  Check to see if it is a bias sawtooth or a bias ramp
- *  Based on which (half or quarter) cycle we are in change the bias  
- *  D/A setting by +/- stairHeightCnts
- *
- *
- * \param con          SDSU context structure
- * \param myInfo       dasInfo structure pointer
- * \param mceInxpt     mcexml_struct pointer for parameter lookup table   
- * \param status       StatusType     
- *
- */
-/*+ sc2dalib_stepTESBias
-*/
-void sc2dalib_stepTESBias
-(
-SDSU_CONTEXT          *con,      
-dasInfoStruct_t       *myInfo,
-struct mcexml_struct  *mceInxpt,   
-StatusType            *status
-)
-{
-
-  char       biasCmd[FILE_LEN];
-  int        currentSet;
-
-  if (*status != STATUS__OK) return;
-
-  currentSet = myInfo->stairPresentValue;
-
-  myInfo->stairNumCount += 1;
-  stairCounter += 1;
-
-  /* Do not do the very last step of the SEQUENCE */
-  if(stairCounter == totalStairCount) return;
-
-  /* Is it a Bias sawtooth */
-  if( (myInfo->drcontrol & BIASSAW_BIT) != 0)
-    {
-
-      if((myInfo->stairQCycleCount == 0) || (myInfo->stairQCycleCount == 3))
-	{
-	  currentSet += myInfo->stairHeightCnts;
-	}
-      else
-	{
-	  currentSet -= myInfo->stairHeightCnts;
-	}
-
-      if(myInfo->stairNumCount >=  myInfo->stairNum)
-	{
-	  myInfo->stairNumCount = 0;
-	  myInfo->stairQCycleCount += 1;
-	  if(myInfo->stairQCycleCount >= 4)
-	    {
-	      myInfo->stairQCycleCount = 0;
-	    }
-	}
-    }
-
-  /* Or is it a Bias ramp */
-  if( (myInfo->drcontrol & BIASRAMP_BIT) != 0)
-    {
-
-      if(myInfo->stairHCycleCount == 0)
-	{
-	  currentSet -= myInfo->stairHeightCnts;
-	}
-      else
-	{
-	  currentSet += myInfo->stairHeightCnts;
-	}
-
-      if(myInfo->stairNumCount >=  myInfo->stairNum)
-	{
-	  myInfo->stairNumCount = 0;
-	  myInfo->stairHCycleCount += 1;
-	  if(myInfo->stairHCycleCount == 1)
-	    {
-	      currentSet += myInfo->stairHeightCnts;
-	    }
-	  else
-	    {
-	      currentSet -= myInfo->stairHeightCnts;
-	      myInfo->stairHCycleCount = 0;
-	    }
-	}
-
-    }
-
-  /* Now set the bias to this value */
-
-  myInfo->stairPresentValue = currentSet;
-  sprintf(biasCmd, "wb bc2 bias %d", currentSet);
-
-  /* fprintf(myInfo->fpLog,"_stepTESBias BIASSAW %s count %d\n",biasCmd,stairCounter); */
-
-  // send cmd and get reply
-  sc2dalib_setmceVal(con, myInfo, mceInxpt, biasCmd, status); 
-  if ( !StatusOkP(status) )
-    {
-      ErsRep(0,status,"sc2dalib_stepTESBias: sc2dalib_setmceval(1) %s failed",biasCmd); 
-      return;
-    }
-		 
 }
 
 
@@ -8223,436 +5294,6 @@ StatusType           *status
   
 }
 
-
-
-// =======sc2dalib_t*******
-//====================//
-/**
- * \fn void sc2dalib_trkheatInit(SDSU_CONTEXT *con, dasInfoStruct_t *myInfo, 
- *   dasCmdInfo_t *myCmd, struct mcexml_struct  *mceinxPtr,
- *   char *dateTime, StatusType *status)
- *
- * \brief function
- *  get args for MCETRKHEAT action and open file
- *
- * \param con       SDSU context structure pointer 
- * \param myInfo    dasInfoStruct_t pointer
- * \param myCmd      dasCmdInfo_t pointer
- * \param mceinxPtr   mcexml_struct pointer for parameter lookup table
- * \param dateTime   dateTime string pointer         
- * \param status    StatusType     
- *
- */
-/*+ sc2dalib_trkheatInit
-*/
-void sc2dalib_trkheatInit
-(
-SDSU_CONTEXT          *con,      
-dasInfoStruct_t       *myInfo,    
-dasCmdInfo_t          *myCmd,
-struct mcexml_struct  *mceinxPtr,
-char                  *dateTime,
-StatusType            *status
-)
-{
-  long         in_sequence,configured;
-  long         range[]={0,2};
-  DitsArgType  argId;
-  char         mceCard[FILE_LEN];
-  char         tmp[FILE_LEN],tmp1[FILE_LEN];
-  char         heatVal[]="rb bc1 bias 1";
-
-  if (*status != STATUS__OK) return;
-
-  // Update debug flag, in case it has changed 
-
-  sc2dalib_updateDebug(con,myInfo, status);
-
-  // Make sure we have been configured and we are not in SEQUENCE
-
-  SdpGeti("CONFIGURED", &configured, status);
-  if (configured==0 )
-    {
-      *status = DITS__APP_ERROR;
-      ErsRep(0,status,"sc2dalib_trkheatInit: the DA is not configured" ); 
-      return;
-    }
-  SdpGeti("IN_SEQUENCE", &in_sequence, status);
-  if(in_sequence != DA_MCE_NONE)
-    {
-      *status = DITS__APP_ERROR;
-      ErsRep(0,status,"sc2dalib_trkheatInit: %s has not completed",
-             seqStatus[myInfo->actionFlag]);
-      return;
-    } 
-  myInfo->actionFlag=TRKHEATACTION;
-
-  /* Using the argument sent to us from the SCUBA2 RTS client set the file save flag
-     data file name and batch file name */
-
-  argId = DitsGetArgument();
-  jitArgGetI(argId, "SVFILE_FLAG", 1, range, 2, 0, &myInfo->filesvFlag,
-	     status );
-  // filesvFlag=1 save cmdreply 
-  // filesvFlag=2 don't save cmdreply, but save data, default? (changed ^)
-  // for heater tracking, we only save data
-  if(myInfo->filesvFlag==1)
-    {
-      myInfo->filesvFlag=2;
-    }
-
-  jitArgGetS(argId, "DATA_FILE", 2, NULL, "data.txt", 0, FILE_LEN,
-	     tmp, NULL, status);
-  //print ?
-  sprintf(myInfo->dataFile, "%s/%s",getenv("CURRENTDATADIR"), tmp);
-  jitArgGetS(argId, "SETUP_FILE", 3, NULL, "setup-trkheater", 0, FILE_LEN,
-	     tmp1, NULL, status);
-  sprintf(myInfo->batchFile, "%s/%s",getenv("CONFIG_ALL"), tmp1);
-
-  /* Read The NUM_TIMES_THRU parameter from the argument */
-  range[1] = 45; /* We really only think one or two */
-  jitArgGetI( argId, "NUM_TIMES_THRU", 1, range, 0, 0, &myInfo->numTimesThru,
-	      status );
-  if( !StatusOkP(status) )
-    {
-      ErsRep(0,status,"sc2dalib_trkheaterInit: failed to get variables.");
-      return;
-    }
-
-  // now get the args from setup file
-  // put all include=xxx in the setup file into a single file  
-  // copy it to batchFile, for sc2dalibsetup_readheaterSetup
-
-  sc2dalibsetup_servoreadsetupWrap(myInfo,status);
-  if ( !StatusOkP(status) )
-    {
-      ErsRep(0,status,"sc2dalib_trkheaterInit: sc2dalibsetup_servoreadsetupWrap failed"); 
-      return;
-    }
-  my_fclose(&(myInfo->fpBatch));
-  if((myInfo->fpBatch=fopen(myInfo->batchFile,"r")) == NULL )
-    {
-      *status = DITS__APP_ERROR;
-      ErsRep (0, status, "sc2dalib_trkheatInit: Error- failed to open file %s", myInfo->batchFile); 
-      return;
-    }
-  jitDebug(16,"sc2dalib_trkheatInit: read %s\n",myInfo->batchFile);
-
-  /* Read in the heater slopes and the heater setup */
-
-  sc2dalib_heaterslopeRead(myInfo, heaterSlope, status);
-
-  sc2dalibsetup_readheaterSetup(myInfo,status);
-  if ( !StatusOkP(status) )
-    {
-      ErsRep(0,status,"sc2dalib_trkheaterInit: sc2dalib_readheaterSetup failed"); 
-      return;
-    }
-  jitDebug(16,"sc2dalib_trkheatInit: finish readheaterSetup\n");
-  my_fclose(&(myInfo->fpBatch));
-  
-  // Build up the goCmd always use rcs card
-  sprintf(mceCard, "rcs");
-  sprintf(myInfo->goCmd, "GO %s ret_dat 1",mceCard);
-
-  sc2dalibsetup_whichRC(myInfo,mceCard,status);
-  if ( !StatusOkP(status) )
-    {
-      ErsRep(0,status,"sc2dalib_trkheatInit: not recognised(%s) as MCE_WHICHCARD",
-	     mceCard);
-      return;
-    }
-  strcpy(myCmd->mceCmd,myInfo->goCmd);
-
-  sc2dalib_getcmdBuf(myInfo,myCmd,mceinxPtr,status);
-  if ( !StatusOkP(status) )
-    {
-      ErsRep(0,status,"sc2dalib_trkheatInit: sc2dalib_getCmdBuf failed"); 
-      return;
-    }
-
-  // Set stripchart file name for recording and displaying tracking results to trkheat.txt 
-
-  if( (myInfo->heatSlp.option & 0x01) != 0 )
-  {
-    sprintf(myInfo->strchartFile,"%s/trkheat.txt", getenv("ORAC_DATA_OUT") );
-  }
-
-  // This deletes the batchfile called tmp which was made in sc2dalibsetup_servoreadsetupWrap
-  // And then used by sc2dalibsetup_readheaterSetup
-  sprintf( tmp, "rm -f %s",myInfo->batchFile);
-  system ( tmp);
-
-  sc2dalib_openFiles(myInfo,DATFILEAPPEND,NOBATCHFILE,status);
-  if ( !StatusOkP(status) )
-  {
-    ErsRep(0,status,"sc2dalib_trkheatInit: sc2dalib_openFiles failed"); 
-    return;
-  }
-    
-  fprintf(myInfo->fpLog,"\n<%s> CMD from sc2dalib__Trkheat\n",dateTime);
-  SdpPuti("IN_SEQUENCE",DA_MCE_SINGLEDATA,status);
-  
-  // read the heater setting to use that as a starting point
-  sc2dalib_readmceVal(con,myInfo,mceinxPtr,heatVal, &myInfo->heatSlp.refHeat,1,status);
-  if (!StatusOkP(status)) 
-  {
-    ErsRep(0,status, "sc2dalib_trkheatInit: sc2dalib_readmceVal failed"); 
-   return;
-  }
-  MsgOut(status,"sc2dalib_trkheatInit: initHeat=%d",myInfo->heatSlp.refHeat);
-  myInfo->trkNo=0;   
-}
-
-
-/**
- * \fn void sc2dalib_trkheatUpdate(SDSU_CONTEXT *con, dasInfoStruct_t *myInfo,
- *  struct mcexml_struct *mceInxpt, int *data, double *slope, 
- *  StatusType *status)
- *
- * \brief function
- *  compare the pixel data with reference Value, adjust heater accordingly.
- *  use heatslope obtained from HEAT_SLOPE
- *
- * \param con      SDSU context structure pointer 
- * \param myInfo   dasInfoStruct_t pointer
- * \param mceInxpt  struct mcexml_struct pointer
- * \param data     int pointer for the data         
- * \param slope    double pointer for heaterSlope         
- * \param status StatusType.  given and return
- *
- */
-/*+ sc2dalib_trkheatUpdate
- */
-void sc2dalib_trkheatUpdate
-(
-SDSU_CONTEXT         *con,         
-dasInfoStruct_t      *myInfo,
-struct mcexml_struct *mceInxpt,
-int                  *data,
-double               *slope,
-StatusType           *status
-)
-{
-#define TOTALPIXEL (ROW_NUM-1)*COL_NUM
-  char         heatCmd[FILE_LEN];
-  int          pixelData[HEAT_TRACK_MAX], indexArray[HEAT_TRACK_MAX];
-  int          pixel,*frameData, medianIndex;
-  int          headNo=FRAMEHEADER_NUM;
-  double       heatVal[HEAT_TRACK_MAX], meanHeat, medianHeat, sigmaHeat;
-  char         readheatCmd[]="rb bc1 bias 1";
-  double       tai;
-  long         taiDays;
-  int row,col,i;
-  int heatDiff;
-  static int first, lastHeat, messCount;
-  static long heatFlag;
-  static int   heat, fdbkRef[HEAT_TRACK_MAX], numActivePixels, activePixels[HEAT_TRACK_MAX], testData;
-  static double activeSlopes[HEAT_TRACK_MAX];
-  StatusType  localStatus;
-
-  if (!StatusOkP(status)) return;
-
-  // skip the frame status 
-  frameData = data+headNo;
- 
-  // use the first data from MCE as the REFERENCE data  
-  if (myInfo->trkNo == 1)
-    { 
-
-      /* Clear the heater tracking has failed flag and set first to true */
-      myInfo->heatTrackFailed = 0;
-      first = 1;
-      messCount = 0;
-
-      /* Initialize the current time to be TAI */
-      sc2headman_getTai(&tai, status);
-      taiDays = (int)tai;
-      myInfo->heatSlp.curTime = tai - taiDays;
-
-      /* Only do this if the UPDATE_HEATER_TRACKING_REFERENCE_BIT has 
-         been set in the HTTRACK_FLAG */
-
-      SdpGeti("HTTRACK_FLAG", &heatFlag, status);
-
-      if((heatFlag & UPDATE_HEATER_TRACKING_REFERENCE_BIT) != 0)
-	{
-
-	  /* Always clear the UPDATE_HEATER_TRACKING_REFERENCE_BIT, 
-	     If the REMEMBER_VALUE_IN_DARK is set */
-
-	  if((heatFlag & REMEMBER_VALUE_IN_DARK) != 0)
-	    {
-	      heatFlag &= ~UPDATE_HEATER_TRACKING_REFERENCE_BIT;
-	      SdpPuti("HTTRACK_FLAG", heatFlag, status);
-	    }
-
-	  sc2dalib_readmceVal(con,myInfo,mceInxpt,readheatCmd, &heat,1,status);
-	  if (!StatusOkP(status)) 
-	    { 
-	      ErsRep(0,status, "sc2dalib_trkheatUpdate: sc2dalib_readmceVal failed"); 
-	      return;
-	    }
-	  myInfo->heatSlp.refHeat=heat;
-    
-	  //get the pixel data,it is sq1-fdbk Val
-	  numActivePixels = 0;
-
-	  for (pixel=0; pixel<TOTALPIXEL; pixel++)
-	    {
-	      if( slope[pixel] != 0 )
-		{
-		  testData = *(frameData + pixel);
-		  if(testData < 0 ) testData = testData * -1;
-		  if(testData > 10000)
-		    {
-		      fdbkRef[numActivePixels]= *(frameData + pixel);
-		      activePixels[numActivePixels]= pixel;
-		      activeSlopes[numActivePixels]= slope[pixel];
-      
-		      col = pixel % COL_NUM;
-		      row = (floor)(pixel / COL_NUM);
-		      myInfo->parshmPtr->heat_track_values[numActivePixels][0] = col;
-		      myInfo->parshmPtr->heat_track_values[numActivePixels][1] = row;
-
-		      numActivePixels += 1;
-		      if(numActivePixels > (HEAT_TRACK_MAX-1)) numActivePixels = (HEAT_TRACK_MAX-1);
-		    }
-
-		}
-	    }
-
-	  myInfo->parshmPtr->heat_track_num = numActivePixels;
-
-	}
-
-      /* If we are writing to a heater tracking file, print out the header */
-
-      if ( (myInfo->heatSlp.option & 0x01 ) != 0)
-	{
-	  fprintf(myInfo->fpStrchart,"# MultiPixel heater tracking Setup information:  TAI Day: %ld\n", taiDays);
-	  fprintf(myInfo->fpStrchart,"# Option: %d  maxOffset: %d  refHeat %d\n",
-		  myInfo->heatSlp.option, myInfo->heatSlp.maxOffset, myInfo->heatSlp.refHeat);
-
-	  for(i=0; i<numActivePixels; i++)
-	    {
-	      /* fprintf(myInfo->fpLog,"Pixel: %d fdbkRef: %d\n",activePixels[i], fdbkRef[i]); */
-	      fprintf(myInfo->fpStrchart,"# Pixel: %5d fdbkRef: %10d slope: %15.2f \n",
-		      activePixels[i], fdbkRef[i],activeSlopes[i]);
-	    }
-
-	  fprintf(myInfo->fpStrchart,"#  Day Fraction   DAC Setting  Slope    Next DAC    pixelNum  pixelData  pixelResult    Mean      Sigma\n");
-	}
-
-      lastHeat = heat;
-
-    }   
-  else /* It is not the first sample of this heater tracking event */
-    {
-
-      if((heatFlag & SIMULATE_HEATER_TRACKING_BIT) != 0)
-	{
-	  return;
-	}
-
-      sc2dalib_trkheatpixelUpdate(myInfo, heat, frameData, fdbkRef,
-				  numActivePixels, activePixels,
-				  activeSlopes, heatVal, first,
-				  pixelData, status);
-      if (!StatusOkP(status))
-	return;
-      first = 0;
-
-      // If bit 1 of heatSlp.option is zero use the meanVal
-      if ( (myInfo->heatSlp.option & 0x02 ) == 0)
-	{
-	  sc2math_clipmean(3.0, numActivePixels, heatVal, &meanHeat, status);
-	  if (!StatusOkP(status)) 
-	    {
-	      ErsRep(0,status, "sc2dalib_trkheatUpdate: sc2math_clipmean failed"); 
-	      return;
-	    }
-	  heat=(int)meanHeat;
-	}
-      else
-	{ // Use the median value
-	  /* Just to keep track of where the median is in all the other arrays */
-	  for(i=0; i<numActivePixels; i++)
-	    {
-	      indexArray[i] = i;
-	    }
-
-	  /* Get the stats for this set of proposed heater settings */
-	  sc2dalib_getStats(heatVal, indexArray, &medianHeat, &medianIndex, numActivePixels, &meanHeat, &sigmaHeat);
-	  heat = (int)medianHeat;
-	}
-
-#define HEAT_STEP 20
-
-      heatDiff = heat - lastHeat;
-      if(heatDiff < 0) heatDiff = heatDiff * (-1);
-      if(heatDiff > HEAT_STEP)
-	{
-	  if((heat - lastHeat) > HEAT_STEP) 
-	    {
-	      heat = lastHeat + HEAT_STEP;
-	    }
-	  else if((heat - lastHeat) < HEAT_STEP) 
-	    {
-	      heat = lastHeat - HEAT_STEP;
-	    }
-	}
-      lastHeat = heat;
-
-
-      /* If we are writing a stripchart file and using median put the stats in the log file */
-      if ( (myInfo->heatSlp.option & 0x03 ) == 0x03)
-	{
-	  fprintf(myInfo->fpStrchart,"%11d %11d %11d %11.4f %11.4f %11.4f\n", heat, activePixels[medianIndex], 
-		  pixelData[medianIndex], medianHeat, meanHeat, sigmaHeat);
-
-	}
-      else if((myInfo->heatSlp.option & 0x03 ) == 0x01)
-	{
-	  fprintf(myInfo->fpStrchart,"%11d %11.4f\n", heat, meanHeat);
-	}
-
-
-      // Out of bounds checking
-      if ( heat > 65535 )
-	{
-	  heat=65535;
-	  myInfo->heatTrackFailed = 1;
-	  if(messCount < 3)
-	    {
-	      localStatus = DITS__APP_ERROR;
-	      ErsRep(0, &localStatus,"_trkheatpixelUpdate heater tracking heatVal has hit upper rail");
-	    }
-	  messCount++;
-	}
-      else if( heat < 0 ) // Allow zero because it might happen on the blackbody source
-	{
-	  heat=0;
-	  myInfo->heatTrackFailed = 1;
-	  if(messCount < 3)
-	    {
-	      localStatus = DITS__APP_ERROR;
-	      ErsRep(0, &localStatus,"_trkheatpixelUpdate heater tracking heatVal is below lower rail");
-	    }
-	  messCount++;
-	}
-
-      sprintf(heatCmd, "wb bc1 bias %d", heat);
-      sc2dalib_setmceVal(con,myInfo,mceInxpt,heatCmd,status);
-      /* fprintf(myInfo->fpLog,"_trkheatUpdate %s\n",heatCmd); */ 
-      if ( !StatusOkP(status) )
-	{
-	  ErsRep(0,status,"sc2dalib_trkheatUpdate: sc2dalib_setmceVal %s failed",
-		 heatCmd); 
-	  return;
-	}
-    }
-}
 
 /**
  * \fn int sc2dalib_getStats( const void *a, const void *b)
@@ -8738,174 +5379,6 @@ void sc2dalib_getStats
 }
 
 /**
- * \fn void sc2dalib_trkheatpixelUpdate(dasInfoStruct_t *myInfo,
- *  int heat, int *data, double *slope, int *fdbkRef, double *heatVal,
- *  int first, StatusType *status)
- *
- * \brief function
- *  compare the pixel data with reference Value, adjust heater accordingly.
- *  use heatslope obtained from HEAT_SLOPE or READHEAT_SLOPE
- *
- * \param myInfo   dasInfoStruct_t     pointer
- * \param heat            int          previous heater setting
- * \param data            int          pointer for the data at the real data position          
- * \param fbdkRef         int          pointer for initial sq1 fdbk (what we try to keep the pixel reading)
- * \param numActivePixels int          Number of active pixels
- * \param activePixels    int          The pixel numbers for each active pixel
- * \param slope           double       The pre-measured heater slopes for each active pixel
- * \param heatVal         double       pointer for heat val at selected pixel (what each pixel thinks the next heater setting should be)
- * \param first           int          True if this is first time routine has been called (this event)
- * \param pixelData       int          The actual data read from each active pixel
- * \param status          StatusType.  given and return
- *
- */
-/*+ sc2dalib_trkheatpixelUpdate
- */
-void sc2dalib_trkheatpixelUpdate
-(
-dasInfoStruct_t      *myInfo,
-int                  heat,
-int                  *data,
-int                  *fdbkRef,
-int                  numActivePixels,
-int                  *activePixels,
-double               *slope,
-double               *heatVal,
-int                  first,
-int                  *pixelData,
-StatusType           *status
-)
-{
-  int          diffVal,pixel,i,diff;
-  double       adjVal, adjPwr, adjCurrent, tempD;
-  double       fullDC=65535, pixelResist=2, current=24.8, c;
-  static       int  lastHeat, heatSlope;
-  static       double  lastValues[HEAT_TRACK_MAX];
-  int caught[HEAT_TRACK_MAX], numcaught=0;
-  StatusType           localStatus;
-
-  if (!StatusOkP(status)) return;
-
-  if(first)
-    {
-      lastHeat=heat;
-      for(i=0; i<HEAT_TRACK_MAX; i++) 
-	lastValues[i] = heat;
-    }
-
-  /* full range of heater is 24.8 microamps, full range of DtoA is 65535 
-     so c is the microamps per count */
-
-  c = current/fullDC;
-
-  if((heat < 0) || (heat > fullDC))
-    {
-      myInfo->heatTrackFailed = 1;
-      localStatus = DITS__APP_ERROR;
-      ErsRep(0,&localStatus,"Invalid heater reading passed to _trkheatpixelUpdate  heat: %d",heat);
-      return;
-    }
-
-  heatSlope = heat - lastHeat;
-  lastHeat = heat;
-
-  if ( (myInfo->heatSlp.option & 0x01 ) != 0)
-    fprintf(myInfo->fpStrchart,"%15.10f %11d  %6d", 
-	    myInfo->heatSlp.curTime, heat, heatSlope);
-
-  #define ONE_HUNDRETH_SEC_MJD 0.000000115
-  myInfo->heatSlp.curTime += ONE_HUNDRETH_SEC_MJD;
- 
-  //calculate the heater Val for each active pixel
-  for (i=0; i<numActivePixels; i++)
-  {
-    caught[i] = 0;
-    pixel = activePixels[i];
-
-    pixelData[i] = *(data+pixel);
-    diffVal= pixelData[i] - fdbkRef[i];
-
-    /* "diffVal" is the difference of what we would like the SQ1FDBK to be and what it 
-       actually is. It is in SQ1FDBK units which are linearly proportional to power
-       received by the pixel. "slope" is in SQ1FDBK units per microwatt, so
-       adjPwr is simply the microwatts we need to change the power by */
-	
-    adjPwr= (double)diffVal/slope[i];
-
-    /* The actual heater current is:
-           heat * c
-       because "heat" is in DtoA counts and c is in microamps per DtoA count. 
-       Then the power that is going to the pixel due to that current is:
-          pixelResist * (heat * c)^2
-       We want to change that power by "adjPwr", so new power we want going to
-       the pixel from the heater is:
-	       pixelResist * (heat * c)^2 - adjPwr
-       But that power is caused by the current through "pixelResist"
-	        P = adjCurrent^2 * pixelResist
-       If we solve for "adjCurrent" we get:
-	        adjCurrent^2 * pixelResist = pixelResist * (heat * c)^2 - adjPwr
-	        adjCurrent^2 = (heat * c)^2 - adjPwr/pixelResist
-	        adjCurrent = sqrt((heat * c)^2 - adjPwr/pixelResist) */
-
-    tempD = pow((double)heat * c, 2) - (adjPwr/pixelResist);
-    if(tempD > 0.0)
-      {
-	adjCurrent = sqrt( tempD );
-      }
-    else
-      {
-	adjCurrent = lastValues[i] * c; /* Better to guess last setting if we are having number issues */
-      }
-
-    /* Since adjCurrent is in microamps and c is in microamps per DtoA count
-       We can convert to to new heater setting with "adjCurrent/c" */
-
-    adjVal=adjCurrent/c;
-    heatVal[i]=adjVal;
-
-    /* If the requested change is too much, only change 
-       by as much as we changed last time (eliminates noise spikes) */
-
-    diff =  heatVal[i] - heat;
-    if(diff < 0) diff = (-1)*diff;
-    if(diff > myInfo->heatSlp.maxOffset) 
-      {
-	heatVal[i]=lastValues[i] + heatSlope;
-	caught[i] = 1;
-	numcaught++;
-      }
-    lastValues[i] = heatVal[i];
-
-    /* Send to the dhtask to write into the data file */
-    myInfo->parshmPtr->heat_track_values[i][2] =  heatVal[i];
-
-    /* if we are writing a stripchart file then log this value
-       if ( ((myInfo->heatSlp.option & 0x01 )!= 0) && (i < 25))
-       fprintf(myInfo->fpStrchart," %11d %11.4f",pixelData[i],heatVal[i]); */
-
-  } // end of for (i=0; i<numActivePixels; i++)
-
-  /* Just do this stuff if we are writing to a stripchart file */
-
-      if ((myInfo->heatSlp.option & 0x01 ) != 0)
-	{
-	  if(numcaught > 0)
-	    {
-	      fprintf(myInfo->fpStrchart,"  #Caught: ");
-
-	      for (i=0; i<numActivePixels; i++)
-		{
-		  if(caught[i] != 0) fprintf(myInfo->fpStrchart," %2d",i);
-		}
-	    }
-	}
-
-  stripchFlag++;
-}  
-
-
-
-/**
  * \fn void sc2dalib_getsq2fbparaInit(SDSU_CONTEXT *con, dasInfoStruct_t *myInfo, 
  *   dasCmdInfo_t *myCmd, struct mcexml_struct  *mceinxPtr,
  *   char *dateTime, ARRAYSET *arrayset,StatusType *status)
@@ -8946,7 +5419,7 @@ StatusType            *status
   if (*status != STATUS__OK) return;
 
   // Update debug flag, in case it has changed 
-  sc2dalib_updateDebug(con,myInfo, status);
+  utils_update_debug(con,myInfo, status);
 
   SdpGeti("CONFIGURED", &configured, status);
   if (configured==0 )
@@ -8998,7 +5471,6 @@ StatusType            *status
   sc2dalib_readOPT(myInfo,arrayset->sq1biasOpt,ROW_NUM,tmp,status);
   if ( !StatusOkP(status) )
     return;
-
   
   // now get the args from setup file
   // put all include=xxx in the setup file into a single file  
@@ -9010,7 +5482,7 @@ StatusType            *status
         "sc2dalib_getsq2fbparaInit: sc2dalibsetup_servoreadsetupWrap failed"); 
     return;
   }
-  my_fclose(&(myInfo->fpBatch));
+  utils_fclose(&(myInfo->fpBatch));
   if((myInfo->fpBatch=fopen(myInfo->batchFile,"r")) == NULL )
     {
       *status = DITS__APP_ERROR;
@@ -9026,7 +5498,7 @@ StatusType            *status
     return;
   }
   jitDebug(16,"sc2dalib_getsq2fbparaInit finish servoreadSetup\n");
-  my_fclose(&(myInfo->fpBatch));
+  utils_fclose(&(myInfo->fpBatch));
 
   if (arrayset->slopSelect[0] <0 )
   {
@@ -9046,12 +5518,11 @@ StatusType            *status
   // always remove previous tmp setupfile
   sprintf( tmp, "rm -f %s",myInfo->batchFile);
   system ( tmp);
-
  
   // fix stripchart name for disply tracking result, 
   //inside it, the col are: == No sq2fb delta sq2fbopt ...(32 col)  ==
   sprintf(myInfo->strchartFile,"%s/trksq2fb.txt", getenv("ORAC_DATA_OUT") );
-  my_fclose(&(myInfo->fpStrchart));
+  utils_fclose(&(myInfo->fpStrchart));
   if ((myInfo->fpStrchart=fopen64(myInfo->strchartFile,"a"))==NULL)
   {
     *status = DITS__APP_ERROR;
@@ -9065,10 +5536,10 @@ StatusType            *status
   stripchFlag=0;
 
   // read sq2fb values from the MCE to sq2fdbkOPt
-  sc2dalib_readmceVal(con,myInfo,mceinxPtr,readsq2fbCmd,arrayset->sq2fdbkOpt,32,status);
+  mce_read(con,myInfo,mceinxPtr,readsq2fbCmd,arrayset->sq2fdbkOpt,32,status);
   if (!StatusOkP(status)) 
   {
-    ErsRep(0,status, "sc2dalib_getsq2fbparaInit:sc2dalib_readmceVal failed to read sq2fb"); 
+    ErsRep(0,status, "sc2dalib_getsq2fbparaInit:mce_read failed to read sq2fb"); 
     return;
   }
   fprintf(myInfo->fpLog,"sq2fdbkOpt readback===== \n");
@@ -9131,7 +5602,7 @@ StatusType            *status
   if (*status != STATUS__OK) return;
 
   // Update debug flag, in case it has changed 
-  sc2dalib_updateDebug(con,myInfo, status);
+  utils_update_debug(con,myInfo, status);
 
   SdpGeti("CONFIGURED", &configured, status);
   if (configured==0 )
@@ -9201,7 +5672,7 @@ StatusType            *status
         "sc2dalib_trksq2fbInit: sc2dalibsetup_servoreadsetupWrap failed"); 
     return;
   }
-  my_fclose(&(myInfo->fpBatch));
+  utils_fclose(&(myInfo->fpBatch));
   if((myInfo->fpBatch=fopen(myInfo->batchFile,"r")) == NULL )
     {
       *status = DITS__APP_ERROR;
@@ -9231,7 +5702,7 @@ StatusType            *status
   // always remove previous tmp setupfile
   sprintf( tmp, "rm -f %s",myInfo->batchFile);
   system ( tmp);
-  my_fclose(&(myInfo->fpBatch));
+  utils_fclose(&(myInfo->fpBatch));
 
   //populate cmd buff myCmd.cmdBuf,always use rcs now
   jitDebug(16,"populate cmd buff\n");
@@ -9257,10 +5728,10 @@ StatusType            *status
   sprintf(myInfo->strchartFile,"%s/trksq2fb.txt", getenv("ORAC_DATA_OUT") );
 
   jitDebug(16,"_openFiles\n");
-  sc2dalib_openFiles(myInfo,DATFILEAPPEND,NOBATCHFILE,status);
+  utils_open_files(myInfo,DATFILEAPPEND,NOBATCHFILE,status);
   if ( !StatusOkP(status) )
   {
-    ErsRep(0,status,"sc2dalib_trksq2fbInit: sc2dalib_openFiles failed"); 
+    ErsRep(0,status,"sc2dalib_trksq2fbInit: utils_open_files failed"); 
     return;
   }
  
@@ -9268,10 +5739,10 @@ StatusType            *status
   SdpPuti("IN_SEQUENCE",DA_MCE_SINGLEDATA,status);
 
   // read sq2fb values from the MCE to sq2fdbkOPt
-  sc2dalib_readmceVal(con,myInfo,mceinxPtr,readsq2fbCmd,arrayset->sq2fdbkOpt,32,status);
+  mce_read(con,myInfo,mceinxPtr,readsq2fbCmd,arrayset->sq2fdbkOpt,32,status);
   if (!StatusOkP(status)) 
   {
-    ErsRep(0,status, "sc2dalib_trksq2fbInit:sc2dalib_readmceVal failed to read sq2fb"); 
+    ErsRep(0,status, "sc2dalib_trksq2fbInit:mce_read failed to read sq2fb"); 
     return;
   }
   fprintf(myInfo->fpLog,"sq2fdbkOpt readback ===== \n");
@@ -9566,7 +6037,6 @@ StatusType            *status
     return;
   }
 }
-
 
 
 /**
@@ -10046,111 +6516,8 @@ StatusType      *status
 }
 
 
-
-
 // =======sc2dalib_v*******
 //====================//
-/**
- * \fn void sc2dalib_variablesInit(SDSU_CONTEXT *con, dasInfoStruct_t *myInfo, 
- *     long cols, long rows, int *pixelMask, StatusType *status)
- *
- * \brief function
- *  set some initial values for con and myInfo 
- *
- * \param con      SDSU_CONTEXT pointer
- * \param myInfo  dasInfoStaruct pointer
- * \param cols     long: initial column number
- * \param rows     long: initial row number
- * \param pixelMask int pointer
- * \param status   StatusType pointer. 
- *
- * if  *status != STATUS__OK, report error.
- *
- */
-/*+ sc2dalib_variablesInit
-*/
-void sc2dalib_variablesInit
-(
-SDSU_CONTEXT    *con,
-dasInfoStruct_t *myInfo,
-long            cols,
-long            rows,
-int             *pixelMask,
-StatusType      *status
-)
-{
-  int    i, j, pixel;
-
-  if (*status != STATUS__OK) return;
-
-  // use the stripchFlag here as time variable for stripchart
-  stripchFlag=0;
-
-  for (j=0; j<41; j++ )
-  {
-    for ( i=0; i<32; i++)
-    {
-      pixel=j*32 +i;
-      pixelMask[pixel]=1;
-    }
-  }
-
-  //FRAMEHEADER_NUM, CHKSUM_NUM defined in dasDrama_par.h
-  myInfo->bufSize = (cols*rows + FRAMEHEADER_NUM + CHKSUM_NUM)*4;
-  con->process.framebufsize = myInfo->bufSize;
-
-  con->process.debuglvl[DAS]       =(char)( myInfo->debuglvl     &0x000000FF);
-  con->process.debuglvl[DATAHANDLE]=(char)((myInfo->debuglvl>> 8)&0x000000FF);
-  con->process.debuglvl[INTERFACE] =(char)((myInfo->debuglvl>>16)&0x000000FF);
-  con->process.debuglvl[DRIVER]    =(char)((myInfo->debuglvl>>24)&0x000000FF);
-
-  myInfo->debuglvl= (long)con->process.debuglvl[DAS];
-  myInfo->doneReadxml=0;
-  myInfo->fpLog=NULL;
-  myInfo->fpMcecmd=NULL;
-  myInfo->fpData=NULL;
-  myInfo->fpBatch=NULL;
-  myInfo->fpStrchart=NULL;
-  myInfo->logfileFlag=0;
-  myInfo->actIndex = -1;
-  myInfo->actionFlag=NONEACTION;
-  myInfo->glbCount=0;
-  myInfo->trkNo=0;
-  // SdsIdType is long
-  myInfo->qlId=0;
-  myInfo->seqId=0;
-  myInfo->timeId=0;
-  myInfo->filenameId=0;
-  myInfo->imageId=0;
-  myInfo->fitsId=0;
-  myInfo->qldataId=0;
-  myInfo->dataFormat=MCE_BINARY_FORM;
-
-  con->gofailflag=SDSU_FALSE;
-  con->dataform=MCE_BINARY_FORM;
-  con->process.seqstatus=SEQ_NOACTION;
-  con->process.framesetup=DA_MCE_NONE;
-  con->process.reason=FRAME_WAITING;
-
-  con->process.exit=0;
-  con->process.svflag=0;
-  con->process.procnum=200;
-  con->process.totalframe=0;
-  con->process.msgFIFO=ERR_NONE;
-  con->process.wrFIFO=FIFO_ERR_NONE;
-  con->process.whereabout=WAIT_OBEY;
-  
-  // parameter shared memory
-  sc2dalib_setsharedMem(con,myInfo,SHAREDM_PAR,sizeof(PAR_SHARED),status);   
-  if (!StatusOkP(status))
-    return;
-  // parameter shared Mempry
-  myInfo->parshmPtr->obsMode=OBS_STARE;  // default mode
-  myInfo->parshmPtr->procNo = 200;       // default 
- 
-}
-
-
 /**
  * \fn void sc2dalib_versionInit(SDSU_CONTEXT *con,dasInfoStruct_t *myInfo, 
  *  char *dateTime,StatusType *status)
@@ -10179,7 +6546,7 @@ StatusType            *status
   if (*status != STATUS__OK) return;
 
   // Update debug flag, in case it has changed 
-  sc2dalib_updateDebug(con,myInfo, status);
+  utils_update_debug(con,myInfo, status);
   SdpGeti("IN_SEQUENCE", &in_sequence, status);
   if(in_sequence != DA_MCE_NONE)
   {
@@ -10263,24 +6630,24 @@ StatusType      *status
      strcpy(versionType,"X");
   else
   {
-     sc2dalib_msgprintSave(myInfo,
+     utils_msg(myInfo,
         "sc2dalib_versionInfo: wrong PCI version Letter, it shall be A or B or X",
         "",USE_MSGOUT,status);
      strcpy(versionType,"NOTVALID --");
   }
   memAddr=(pciVer[0] & 0x0000FFFF);
-  sc2dalib_msgprintSave(myInfo,
+  utils_msg(myInfo,
                     "===========   VERSION INFORMATION   ===========",
                     "",USE_MSGOUT,status);
-  sc2dalib_msgprintSave(myInfo,"sc2dalib_versionInfo: driver version= %s",
+  utils_msg(myInfo,"sc2dalib_versionInfo: driver version= %s",
                     myInfo->drvVersion,USE_MSGOUT,status);
-  sc2dalib_msgprintSave(myInfo,"sc2dalib_versionInfo: DAS version=%s",
+  utils_msg(myInfo,"sc2dalib_versionInfo: DAS version=%s",
                      DAS_VERSION,0,status);
   sprintf(localmsg," PCI DSP version=%s%04lX (X:03)",versionType,memAddr);
-  sc2dalib_msgprintSave(myInfo,"sc2dalib_versionInfo:%s",localmsg,USE_MSGOUT,status);
+  utils_msg(myInfo,"sc2dalib_versionInfo:%s",localmsg,USE_MSGOUT,status);
   sprintf(localmsg," PCI DSP date=%06lX (X:04)",pciVer[1]);
-  sc2dalib_msgprintSave(myInfo,"sc2dalib_versionInfo:%s",localmsg,USE_MSGOUT,status);
-  sc2dalib_msgprintSave(myInfo,
+  utils_msg(myInfo,"sc2dalib_versionInfo:%s",localmsg,USE_MSGOUT,status);
+  utils_msg(myInfo,
                     "===============================================",
                     "",USE_MSGOUT,status);
 }
@@ -10361,7 +6728,7 @@ StatusType            *status
   }
   *option=flag;
   jitDebug(2,"_sq1optptsInit:sq1optPoint=%s\n",myInfo->batchFile);
-  my_fclose(&(myInfo->fpBatch));
+  utils_fclose(&(myInfo->fpBatch));
   if ((myInfo->fpBatch = fopen(myInfo->batchFile,"r")) == NULL)
   {
     *status = DITS__APP_ERROR;
@@ -11237,7 +7604,6 @@ StatusType *status
 }
 
 
-
 /**
  * \fn void sc2dalib_sq1optAlgrm(dasInfoStruct_t *myInfo, ARRAYSET *setup, int *sq1bcomp,
  *  int *sq2fcomp, int *sq1bias, int *sq2feedback, int *sq1refbias,  int *sq2reffeedback, 
@@ -11332,7 +7698,7 @@ StatusType *status
     sprintf(tmpfile, "%s-pixel",myInfo->dataFile);
     //  bad pixel if squal=1 
     sc2dalib_writepixelInx(myInfo,setup,tmpfile,squal,0,status);
-    my_fclose(&(myInfo->fpData));
+    utils_fclose(&(myInfo->fpData));
     if((myInfo->fpData = fopen( myInfo->dataFile, "w" )) == NULL )
       {
 	*status = DITS__APP_ERROR;
@@ -11382,7 +7748,7 @@ StatusType *status
       }
     }
     fprintf ( myInfo->fpData, "\n" );
-    my_fclose(&(myInfo->fpData));
+    utils_fclose(&(myInfo->fpData));
   }
 }
 
@@ -11779,7 +8145,7 @@ StatusType *status
   sc2dalib_sq1optsavesq1bComp(fpopen,"biasoptPt= ",sq1bcomp,0,status);
 
   fprintf(fpopen, "\n\n#this is sq2fdbk optimal val, BAD =0\n");
-  sc2dalib_writearray2setupFile(fpopen,"sq2fdbkopt= ",(void *)sq2fcomp, INT_NUMBER,status);
+  utils_array_to_file(fpopen,"sq2fdbkopt= ",(void *)sq2fcomp, INT_NUMBER,status);
 
  
   fclose(fpopen);
@@ -11915,66 +8281,3 @@ StatusType *status
   }
 }
 
-
-/**
- * \fn void sc2dalib_writearray2setupFile(FILE *fp,  char *itemName, void *array,
- *    int flag, StatusType *status)
- *
- * \brief function
- *  write item  to middle setup file 
- *
- * \param fp      FILE pointer
- * \param item    string
- * \param array   void pointer
- * \param flag    int  FLOAT_NUMBER, INT_NUMBER 
- * \param dim     int  array dim
- * \param status   StatusType pointer.  given and return
- *
- */
-/*+ sc2dalib_writearray2setupFile
-*/
-void sc2dalib_writearray2setupFile
-(
-FILE       *fp,
-char       *item,
-void       *array,
-int        flag,
-StatusType *status
-)
-{
-  int   col, card,i;
-  int   *intArray=NULL;
-  float *floatArray=NULL;
-
-  if ( !StatusOkP(status) ) return;
-
-  if (flag==INT_NUMBER)
-    intArray=(int*)array;
-  else
-    floatArray=(float*)array;
-
-  col=0;
-  for (card=1; card<=4; card++)
-  {
-    fprintf(fp,"#RC%1d\n%s",card,item);
-    for ( i=0; i<8; i++)
-    {
-      if (flag==INT_NUMBER)
-      { 
-        if(  intArray[col]==VAL__BADI )
-          fprintf(fp,"0  ");
-        else
-          fprintf(fp,"%4d ", intArray[col]);
-      }
-      else
-      { 
-        if(  floatArray[col]==VAL__BADI )
-          fprintf(fp,"0  ");
-        else
-         fprintf(fp,"%4.2f ",floatArray[col]);
-      }
-      col ++;
-    }
-    fprintf(fp,"\n");
-  }
-}

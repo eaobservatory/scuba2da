@@ -8,18 +8,9 @@
  * \version 1.0.0
  */
 
-//#include "sc2math.h"   // for sc2math-linfit
-// #include "math.h"      // for pow
-//#include "sc2da_par.h"
-//#include "sc2da_struct.h"
-// #include "jitXML.h"
-//#include "sc2sqopt_par.h"
-//#include "sc2sqopt.h"
-//#include "star/atl.h"
-// #include "sc2dalib.h"
+#include "sc2da_utils.h"
+#include "sc2da_mce.h"
 #include "sc2da_heat.h"
-// #include "sc2headman.h"
-// #include "sc2dalibsetup.h"
 
 static int stairCounter;
 
@@ -74,18 +65,18 @@ StatusType            *status
   stairCounter = 0;
 
   /* Read the current heater setting */
-  sc2dalib_readmceVal(con, myInfo, mceInxpt, heatVal, &currentSetHeat, 1, status);
+  mce_read(con, myInfo, mceInxpt, heatVal, &currentSetHeat, 1, status);
   if (!StatusOkP(status)) 
     {
-      ErsRep(0,status, "heat_init_bias: sc2dalib_readmceVal(1) failed to read heater value"); 
+      ErsRep(0,status, "heat_init_bias: mce_read(1) failed to read heater value"); 
       return;
     }
 
   /* Read the current TES bias setting */
-  sc2dalib_readmceVal(con, myInfo, mceInxpt, biasVal, &currentSetBias, 1, status);
+  mce_read(con, myInfo, mceInxpt, biasVal, &currentSetBias, 1, status);
   if (!StatusOkP(status)) 
     {
-      ErsRep(0,status, "heat_init_bias: sc2dalib_readmceVal(1) failed to read bias value"); 
+      ErsRep(0,status, "heat_init_bias: mce_read(1) failed to read bias value"); 
       return;
     }
   myInfo->detbias = currentSetBias;
@@ -136,10 +127,10 @@ StatusType            *status
 
       sprintf(mceCmd, "wb bc1 bias %d", result);
       // send cmd and get reply
-      sc2dalib_setmceVal(con,myInfo,mceInxpt,mceCmd,status);
+      mce_set(con,myInfo,mceInxpt,mceCmd,status);
       if ( !StatusOkP(status) )
 	{
-	  ErsRep(0,status,"heat_init_bias: sc2dalib_setmceval(1) %s failed",mceCmd); 
+	  ErsRep(0,status,"heat_init_bias: mce_set(1) %s failed",mceCmd); 
 	  return;
 	}
       /* fprintf(myInfo->fpLog,"heat_init_bias FLATFIELD %s\n",mceCmd); */
@@ -175,10 +166,10 @@ StatusType            *status
 
       sprintf(mceCmd, "wb bc1 bias %d", currentSetHeat);
       // send cmd and get reply
-      sc2dalib_setmceVal(con,myInfo,mceInxpt,mceCmd,status);
+      mce_set(con,myInfo,mceInxpt,mceCmd,status);
       if ( !StatusOkP(status) )
 	{
-	  ErsRep(0,status,"heat_init_bias: sc2dalib_setmceval(2) %s failed",mceCmd); 
+	  ErsRep(0,status,"heat_init_bias: mce_set(2) %s failed",mceCmd); 
 	  return;
 	}
       /* fprintf(myInfo->fpLog,"heat_init_bias HEATRAMP %s\n",mceCmd); */
@@ -216,10 +207,10 @@ StatusType            *status
       sprintf(mceCmd, "wb bc2 bias %d", result);
       // send cmd and get reply
       fprintf(myInfo->fpLog,"heat_init_bias BIASSAW %s\n",mceCmd);
-      sc2dalib_setmceVal(con,myInfo,mceInxpt,mceCmd,status);
+      mce_set(con,myInfo,mceInxpt,mceCmd,status);
       if ( !StatusOkP(status) )
 	{
-	  ErsRep(0,status,"heat_init_bias: sc2dalib_setmceval(3) %s failed",mceCmd); 
+	  ErsRep(0,status,"heat_init_bias: mce_set(3) %s failed",mceCmd); 
 	  return;
 	}
 
@@ -253,10 +244,10 @@ StatusType            *status
       sprintf(mceCmd, "wb bc2 bias %d", currentSetBias);
       // send cmd and get reply
       fprintf(myInfo->fpLog,"heat_init_bias BIASRAMP %s\n",mceCmd);
-      sc2dalib_setmceVal(con,myInfo,mceInxpt,mceCmd,status);
+      mce_set(con,myInfo,mceInxpt,mceCmd,status);
       if ( !StatusOkP(status) )
 	{
-	  ErsRep(0,status,"heat_init_bias: sc2dalib_setmceval(4) %s failed",mceCmd); 
+	  ErsRep(0,status,"heat_init_bias: mce_set(4) %s failed",mceCmd); 
 	  return;
 	}
 
@@ -304,10 +295,10 @@ StatusType            *status
 	  sprintf(mceCmd, "wb bc1 bias %d", myInfo->pixelHeat);
 	  // send cmd and get reply
 	  /* fprintf(myInfo->fpLog,"heat_init_bias slow flat %s\n",mceCmd);*/
-	  sc2dalib_setmceVal(con,myInfo,mceInxpt,mceCmd,status); 
+	  mce_set(con,myInfo,mceInxpt,mceCmd,status); 
 	  if ( !StatusOkP(status) )
 	    {
-	      ErsRep(0,status,"heat_init_bias: sc2dalib_setmceval(2) %s failed",mceCmd); 
+	      ErsRep(0,status,"heat_init_bias: mce_set(2) %s failed",mceCmd); 
 	      return;
 	    }
 	  // sleep for 10ms for heater to settle down
@@ -350,7 +341,7 @@ StatusType         *status
   if (*status != STATUS__OK) return;
 
   // Update debug flag, in case it has changed 
-  sc2dalib_updateDebug(con,myInfo,status);
+  utils_update_debug(con, myInfo, status);
  
   SdpGeti("IN_SEQUENCE", &in_sequence, status);
   if(in_sequence != DA_MCE_NONE)
@@ -382,7 +373,7 @@ StatusType         *status
     ErsRep(0,status,"heat_init_slope: sc2dalibsetup_servoreadsetupWrap failed"); 
     return;
   }
-  my_fclose(&(myInfo->fpBatch));
+  utils_fclose(&(myInfo->fpBatch));
   if((myInfo->fpBatch = fopen(myInfo->batchFile,"r")) == NULL )
     {
       *status = DITS__APP_ERROR;
@@ -399,7 +390,7 @@ StatusType         *status
     // in sc2dalib__heatslope call sc2dalib_actionfileEnd to close file
     return;
   }
-  my_fclose(&(myInfo->fpData));
+  utils_fclose(&(myInfo->fpData));
   if((myInfo->fpData = fopen( myInfo->dataFile, "a" )) == NULL )
     {
       *status = DITS__APP_ERROR;
@@ -410,7 +401,7 @@ StatusType         *status
   sprintf(myInfo->batchFile,"%s-row%d-col%d",myInfo->dataFile, 
           myInfo->heatSlp.row, myInfo->heatSlp.col);
 
-  my_fclose(&(myInfo->fpBatch));
+  utils_fclose(&(myInfo->fpBatch));
   if((myInfo->fpBatch = fopen(myInfo->batchFile, "w")) == NULL)
   {
     *status=DITS__APP_ERROR;
@@ -425,7 +416,7 @@ StatusType         *status
   {
     sprintf(myInfo->strchartFile,"%s-row%d-col%d-pixel",myInfo->dataFile, 
           myInfo->heatSlp.row, myInfo->heatSlp.col);
-    my_fclose(&(myInfo->fpStrchart));
+    utils_fclose(&(myInfo->fpStrchart));
     if((myInfo->fpStrchart = fopen(myInfo->strchartFile, "w")) == NULL)
     {
       *status=DITS__APP_ERROR;
@@ -538,7 +529,7 @@ StatusType       *status
     // use cmdrepFile for the heater data file
     sprintf(myInfo->cmdrepFile,"%s/%s-%d-eng.txt",getenv("CURRENTDATADIR"),
             myInfo->heatSlp.base, i);
-    my_fclose(&(myInfo->fpOtheruse));
+    utils_fclose(&(myInfo->fpOtheruse));
     if ((myInfo->fpOtheruse = fopen( myInfo->cmdrepFile, "r" )) == NULL)
     {  
       *status=DITS__APP_ERROR;
@@ -574,7 +565,7 @@ StatusType       *status
       free(weight);
       free(chData); 
       // in sc2dalib__heatslope call sc2dalib_actionfileEnd to close file
-      ErsRep(0,status,"heat_slope: sc2dalib_readheaterData failed"); 
+      ErsRep(0,status,"heat_slope: sc2dalibsetup_readheaterData failed"); 
       return;
     }
     /* Note that weight does not change it is a constant 1
@@ -583,7 +574,7 @@ StatusType       *status
     powerPtr[i]=heat;
     weight[i]=1;
 
-    my_fclose(&(myInfo->fpOtheruse));
+    utils_fclose(&(myInfo->fpOtheruse));
     
     MsgOut(status," %d frames average completed for (%s-%d)",
            howmany,  myInfo->heatSlp.base, i);
@@ -850,7 +841,7 @@ StatusType            *status
 
   // Update debug flag, in case it has changed 
 
-  sc2dalib_updateDebug(con,myInfo, status);
+  utils_update_debug(con,myInfo, status);
 
   // Make sure we have been configured and we are not in SEQUENCE
 
@@ -899,7 +890,7 @@ StatusType            *status
         status );
   if( !StatusOkP(status) )
     {
-      ErsRep(0,status,"sc2dalib_trkheaterInit: failed to get variables.");
+      ErsRep(0,status,"heat_init_track: failed to get variables.");
       return;
     }
 
@@ -910,10 +901,10 @@ StatusType            *status
   sc2dalibsetup_servoreadsetupWrap(myInfo,status);
   if ( !StatusOkP(status) )
     {
-      ErsRep(0,status,"sc2dalib_trkheaterInit: sc2dalibsetup_servoreadsetupWrap failed"); 
+      ErsRep(0,status,"heat_init_track: sc2dalibsetup_servoreadsetupWrap failed"); 
       return;
     }
-  my_fclose(&(myInfo->fpBatch));
+  utils_fclose(&(myInfo->fpBatch));
   if((myInfo->fpBatch=fopen(myInfo->batchFile,"r")) == NULL )
     {
       *status = DITS__APP_ERROR;
@@ -929,11 +920,11 @@ StatusType            *status
   sc2dalibsetup_readheaterSetup(myInfo,status);
   if ( !StatusOkP(status) )
     {
-      ErsRep(0,status,"sc2dalib_trkheaterInit: sc2dalib_readheaterSetup failed"); 
+      ErsRep(0,status,"heat_init_track: sc2dalibsetup_readheaterSetup failed"); 
       return;
     }
   jitDebug(16,"heat_init_track: finish readheaterSetup\n");
-  my_fclose(&(myInfo->fpBatch));
+  utils_fclose(&(myInfo->fpBatch));
   
   // Build up the goCmd always use rcs card
   sprintf(mceCard, "rcs");
@@ -967,10 +958,10 @@ StatusType            *status
   sprintf( tmp, "rm -f %s",myInfo->batchFile);
   system ( tmp);
 
-  sc2dalib_openFiles(myInfo,DATFILEAPPEND,NOBATCHFILE,status);
+  utils_open_files(myInfo,DATFILEAPPEND,NOBATCHFILE,status);
   if ( !StatusOkP(status) )
   {
-    ErsRep(0,status,"heat_init_track: sc2dalib_openFiles failed"); 
+    ErsRep(0,status,"heat_init_track: utils_open_files failed");
     return;
   }
     
@@ -978,10 +969,10 @@ StatusType            *status
   SdpPuti("IN_SEQUENCE",DA_MCE_SINGLEDATA,status);
   
   // read the heater setting to use that as a starting point
-  sc2dalib_readmceVal(con,myInfo,mceinxPtr,heatVal, &myInfo->heatSlp.refHeat,1,status);
+  mce_read(con,myInfo,mceinxPtr,heatVal, &myInfo->heatSlp.refHeat,1,status);
   if (!StatusOkP(status)) 
   {
-    ErsRep(0,status, "heat_init_track: sc2dalib_readmceVal failed"); 
+    ErsRep(0,status, "heat_init_track: mce_read failed"); 
    return;
   }
   MsgOut(status,"heat_init_track: initHeat=%d",myInfo->heatSlp.refHeat);
@@ -1068,10 +1059,10 @@ StatusType           *status
         SdpPuti("HTTRACK_FLAG", heatFlag, status);
       }
 
-      sc2dalib_readmceVal(con,myInfo,mceInxpt,readheatCmd, &heat,1,status);
+      mce_read(con,myInfo,mceInxpt,readheatCmd, &heat,1,status);
       if (!StatusOkP(status)) 
       { 
-        ErsRep(0,status, "heat_update_track: sc2dalib_readmceVal failed"); 
+        ErsRep(0,status, "heat_update_track: mce_read failed"); 
         return;
       }
       myInfo->heatSlp.refHeat=heat;
@@ -1209,11 +1200,11 @@ StatusType           *status
     }
 
     sprintf(heatCmd, "wb bc1 bias %d", heat);
-    sc2dalib_setmceVal(con,myInfo,mceInxpt,heatCmd,status);
+    mce_set(con,myInfo,mceInxpt,heatCmd,status);
     /* fprintf(myInfo->fpLog,"_trkheatUpdate %s\n",heatCmd); */ 
     if ( !StatusOkP(status) )
     {
-      ErsRep(0,status,"heat_update_track: sc2dalib_setmceVal %s failed",
+      ErsRep(0,status,"heat_update_track: mce_set %s failed",
              heatCmd); 
       return;
     }
@@ -1484,10 +1475,10 @@ StatusType            *status
   /* fprintf(myInfo->fpLog,"_stepHeaterCurrent %s\n",heatCmd); */
 
   // send cmd and get reply
-  sc2dalib_setmceVal(con, myInfo, mceInxpt, heatCmd, status); 
+  mce_set(con, myInfo, mceInxpt, heatCmd, status); 
   if ( !StatusOkP(status) )
   {
-    /* ErsRep(0,status,"heat_step_current: sc2dalib_setmceval(1) %s failed",heatCmd); */ 
+    /* ErsRep(0,status,"heat_step_current: mce_set(1) %s failed",heatCmd); */ 
     return;
   }  
 }
@@ -1589,10 +1580,10 @@ StatusType            *status
   /* fprintf(myInfo->fpLog,"_stepTESBias BIASSAW %s count %d\n",biasCmd,stairCounter); */
 
   // send cmd and get reply
-  sc2dalib_setmceVal(con, myInfo, mceInxpt, biasCmd, status); 
+  mce_set(con, myInfo, mceInxpt, biasCmd, status); 
   if ( !StatusOkP(status) )
   {
-    ErsRep(0,status,"heat_step_TES: sc2dalib_setmceval(1) %s failed",biasCmd); 
+    ErsRep(0,status,"heat_step_TES: mce_set(1) %s failed",biasCmd); 
     return;
   } 
 }

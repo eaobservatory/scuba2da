@@ -906,7 +906,7 @@ StatusType            *status
   if (*status != STATUS__OK) return;
 
   // Update debug flag, in case it has changed 
-  sc2dalib_updateDebug(con,myInfo, status);
+  utils_update_debug(con,myInfo, status);
 
   SdpGeti("CONFIGURED", &configured, status);
   if (configured==0 )
@@ -1019,10 +1019,10 @@ StatusType            *status
   }
 
 
-  sc2dalib_openFiles(myInfo,DATFILENOAPPEND,OTHERFILE,status);
+  utils_open_files(myInfo,DATFILENOAPPEND,OTHERFILE,status);
   if ( !StatusOkP(status) )
   {
-    ErsRep(0,status,"sc2daservoInit: sc2dalib_openFiles failed"); 
+    ErsRep(0,status,"sc2daservoInit: utils_open_files failed"); 
     return;
   }
 
@@ -1441,7 +1441,7 @@ StatusType            *status
 
   if (!StatusOkP(status)) return;
 
-  sc2dalib_readmceVal(con,myInfo,mceinxPtr,sampleCmd,&setup->sampleNo,1,status);
+  mce_read(con,myInfo,mceinxPtr,sampleCmd,&setup->sampleNo,1,status);
   if (!StatusOkP(status)) 
     return;
   else
@@ -1457,7 +1457,7 @@ StatusType            *status
     ErsRep(0,status,"sc2dareadmceparVal: sampleNo=0 ");
     return;
   }
-  sc2dalib_readmceVal(con,myInfo,mceinxPtr,datamodeCmd,&setup->dataMode,1,status);
+  mce_read(con,myInfo,mceinxPtr,datamodeCmd,&setup->dataMode,1,status);
   if (!StatusOkP(status)) 
     return;
   else
@@ -1850,7 +1850,7 @@ StatusType           *status
       {
         sprintf(msg,"%s biasInx=<%d>.....",setup->servoName,biasInx);
         //  =0, use MsgOut, =1 use ErsOut, =2 ErsRep  3, printf, >3 no print
-        sc2dalib_msgprintSave(myInfo,"servo:%s",msg,NO_PRINT,status);
+        utils_msg(myInfo,"servo:%s",msg,NO_PRINT,status);
         if (setup->servo==SQ2SERVO)
         {
           sc2daservoprintMsg(setup, myInfo->fpLog, INT_NUMBER,setup->initFB,"initFB",status);
@@ -1951,7 +1951,7 @@ StatusType           *status
       else
       {
         sprintf(msg,"end biasInx=<%d> =====",biasInx);
-        sc2dalib_msgprintSave(myInfo,"sc2daservoFunc: %s",msg,NO_PRINT,status);
+        utils_msg(myInfo,"sc2daservoFunc: %s",msg,NO_PRINT,status);
 
         biasInx=0;            *isEnd=1;
         if (servoFp !=NULL)   fclose(servoFp);
@@ -2148,7 +2148,7 @@ StatusType           *status
  
   if( *initFlag==1)
   {
-    sc2dalib_msgprintSave(myInfo,"sc2daservossalckFunc","",NO_PRINT,status);
+    utils_msg(myInfo,"sc2daservossalckFunc","",NO_PRINT,status);
     sq2bias = setup->minBIAS + biasInx*setup->stepBIAS;
     fdbkInx=ptrFlag=0;
     resetSSA=0;
@@ -2186,7 +2186,7 @@ StatusType           *status
       }
       else
       {
-        //sc2dalib_msgprintSave(myInfo,"sc2daservossalckFunc","",0,status);
+        //utils_msg(myInfo,"sc2daservossalckFunc","",0,status);
 
         // findlock point from ssalckdataBuf
         // tmp save to cmdrepFile
@@ -3475,7 +3475,7 @@ StatusType           *status
     if( waveFlag==0)
     {
       sprintf(msg,"heaterStepdown=<%d>.....",biasInx);
-      sc2dalib_msgprintSave(myInfo,"sc2datransitFunc: %s",msg,USE_PRINT,status);
+      utils_msg(myInfo,"sc2datransitFunc: %s",msg,USE_PRINT,status);
       // 1 use tri-angle get heater modulation. setup->minFDBK
       sc2dalibsetup_heaterGen(setup,1,status);
       if (biasInx ==0)

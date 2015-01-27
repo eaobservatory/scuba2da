@@ -1,3 +1,5 @@
+#ifndef sc2da_struct_h
+#define sc2da_struct_h
 /**
  * \file sc2da_struct.h
  *
@@ -30,167 +32,61 @@
  *  Revision 1.48  2011/03/01 23:47:27  cwalther
  *  Added test for maximum gaini, set to zero if greater than maximum
  *
- *  Revision 1.47  2010/09/30 20:32:46  cwalther
- *   Marked locations where i_clamp_val changes are needed
- *
- *  Revision 1.46  2010/09/30 20:09:42  cwalther
- *  Changes made while for engineering with science mode
- *
- *  Revision 1.45  2010/09/23 18:54:09  cwalther
- *  Changes for handling darkheat and datamode
- *
- *  Revision 1.44  2010/08/30 19:32:47  cwalther
- *  Changes for reading complete MCE status and writing it out as a stringified AST object
- *
- *  Revision 1.43  2010/03/04 01:32:54  cwalther
- *  Changes for heater tracking memory and setting back to defaults in the dark
- *
- *  Revision 1.42  2010/02/19 00:29:10  cwalther
- *  Changes to make fast flat fields work
- *
- *  Revision 1.41  2009/12/08 00:53:25  cwalther
- *  Added the concept of a SEQUENCE obs type and checking for dead data handling tasks
- *
- *  Revision 1.40  2009/11/18 22:23:38  cwalther
- *  The changes required to log heater tracking in the data set
- *
- *  Revision 1.39  2009/11/16 19:26:52  cwalther
- *  Gao's changes for post-mortem status of the data handling task
- *
- *  Revision 1.38  2009/10/27 02:51:52  cwalther
- *  These were Gao's changes for faster setups
- *
- *  Revision 1.37  2009/10/14 20:34:16  cwalther
- *  Going back one version
- *
- *  Revision 1.35  2009/09/02 00:33:06  cwalther
- *  Added code for overriding the optical code reader, fixed some items Tim wanted fixed in the Data file
- *
- *  Revision 1.34  2009/08/11 15:10:27  xgao
- *  update to UPDATE_SQ2FB SQ1LOCK and tidyup scripts
- *
- *  Revision 1.33  2009/06/25 02:34:21  cwalther
- *  Changes to make QL structure consistent for all types of modes
- *
- *  Revision 1.32  2009/01/07 19:39:16  cwalther
- *  Modifications for reading in the Integrator and proportional gains
- *
- *  Revision 1.31  2008/12/31 00:08:16  cwalther
- *  Changes to make Gao's mutipixel heater tracking work
- *
- *  Revision 1.30  2008/12/12 22:27:19  xgao
- *  sq2fb servo test
- *
- *  Revision 1.29  2008/12/04 00:33:21  cwalther
- *  Changes for new FOCUSSCAN mode and using nominal heater current as base in flatfield
- *
- *  Revision 1.28  2008/11/14 00:53:23  cwalther
- *  Fixed filename in QL structure, INBEAM now comes from the rtsClient, added reading detbias from the MCE, changed SdsNew to ArgPuts to fix multiple FRAMENUMs in the QL structure
- *
- *  Revision 1.27  2008/10/24 18:52:32  cwalther
- *  Stuff to almost get the FITS INBEAM parameter working
- *
- *  Revision 1.26  2008/08/15 15:23:06  xgao
- *  add headerwriteNo headerreadNo, askSDF in dasInfo
- *
- *  Revision 1.25  2008/08/07 01:49:37  cwalther
- *  Lots for changes for headers from Craig. Changes in handling events from Gao
- *
- *  Revision 1.24  2008/07/30 01:01:57  cwalther
- *  added instap_x and instap_y to PAR_SHARED structure
- *
- *  Revision 1.23  2008/07/25 01:55:29  firmin
- *  Removed typedef for SC2STORETelpar2 from sc2da_struct.h
- *
- *  Revision 1.22  2008/07/21 21:16:16  firmin
- *  put telpar individual values in sc2da_struct.h and get telpar in sc2da.c
- *
- *  Revision 1.21  2008/07/02 21:28:28  xgao
- *  change function names as sc2dalib_ sc2dalibsetup_ for sc2dalib.c sc2dalibsetup.c
- *
- *  Revision 1.20  2008/06/28 20:11:55  xgao
- *
- *  during initialise, call jitPathGet if SC2ENGMODE ==0 and 1. otherwise,don't call
- *  check if USEDV==1,    seq: before GO cmd, send dvCmd to MCE
- *                    trkheat: before GO cmd, send notdvCmd to MCE
- *                      servo: before GO cmd, send notdvCmd to MCE
- *  seq:    move DitsTriger after sc2headman_seqStart
- *  trkheat move DitsTriger after receiving first data frame
- *  add pixelMask action, after task loaded, pixelMask[]=1;
- *                        after pixelmask cmd, pixelMask[] is updated by pixelmask.xml
- *                        pixelMak[] is applied to I-Val for MCE
- *  take HELP off as jit will handle it
- *
- *  Revision 1.19  2008/06/05 00:43:43  cwalther
- *  Changes to get things working at JAC
- *
- *  Revision 1.18  2008/05/02 13:26:26  xgao
- *
- *  tested STARE/SCAN/DREAM without restart DAS. for DREAM, reconstruct Iamge
- *  from frames (don't call _flatten)  0p47
- *
- *  Revision 1.17  2008/04/24 15:12:02  xgao
- *  add Dream bef-BDK, tidy sc2da_struct.h
- *
- *  Revision 1.16  2008/03/26 15:56:09  xgao
- *  add substart subEnd for QL and SCAN too
- *
- *  Revision 1.15  2008/03/26 15:39:26  xgao
- *   add nrec jcmtheadEntry
- *
- *  Revision 1.14  2008/03/07 15:27:06  xgao
- *  tidy up after doxygen 0p44, and merge from atc and cardiff
- *
- *  Revision 1.13  2008/02/20 15:08:42  xgao
- *  JAC AT tested STARE
- *
- *  Revision 1.12  2007/12/07 16:01:19  xgao
- *
- *  some modifications after SG array test, shutter only third open, new
- *  initialise.xml ( flatfile, INITFLAG) and configure.xml (DATA_MODE).
- *  negative pixHeat for loadv in SETU_SEQ. Add findheaterspike for processing
- *  heaterservo data for G/Tc.
- *
- *  Revision 1.11  2007/11/02 12:14:08  xgao
- *
- *  update to 0p33-021107, worked with JOC for INIT,CONFIG, SETUPSEQ, SEQ
- *
- *  Revision 1.10  2007/10/01 14:20:36  xgao
- *  add flatfile to dasInfoStruct_t, PAR_SHARED
- *
- *  Revision 1.9  2007/09/05 16:33:48  xgao
- *
- *  add heaterslope, trkHeater tested Ok, sq1Refbias and sq2Reffb always use the last one
- *  always do manual adjustment after optimal, fits4all is now in parShm, bigPhy=512M now
- *  0p21, ndf is turned on, tested with startmce-rtsc flatfield-seg
- *
- *  Revision 1.8  2007/08/10 16:38:54  xgao
- *
- *  minor change from 0p16-nondf, cablecorrect updates ssabiaslock
- *  and is controlled by slopSletect[9]. 0p17-nondf
- *
- *  Revision 1.7  2007/08/06 15:57:40  xgao
- *  re-organise servo setupfile, use include=. 0p16-nondf
- *
- *  Revision 1.6  2007/08/02 21:09:40  xgao
- *  fix three bugs after autoset run,0p15-nondf
- *
- *  Revision 1.5  2007/07/23 21:10:46  xgao
- *  second update to match ICD
- *
- *  Revision 1.4  2007/07/09 16:03:47  xgao
- *  consider eng and rtsc both firstStep
- *
- *  Revision 1.3  2007/06/18 23:19:21  xgao
- *  add functions for SCRIPTDAS
- *
- *  Revision 1.2  2007/05/28 17:16:15  xgao
- *  change glbInfo to myInfo move sc2dareadmceval from libservo to lib
- *
  *  Revision 1.1.1.1  2007/05/16 08:27:00  dkelly
  *  first insertion
  *
  */
+
+// #ifndef FILE_LEN
+//  #define FILE_LEN 100
+// #endif
+
+// #ifndef CMD_LEN
+//  #define CMD_LEN 290
+// #endif
+// standard C
+
+#include <errno.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include <string.h>
+#include <stddef.h>
+#include <sys/ipc.h>
+#include <math.h>
+#include <time.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <sys/stat.h>
+#include <features.h>
+#include <sys/shm.h>
+#include <sys/mman.h>
+
+#include <sdsudriver_err.h> 
+#include <sdsudriver_errstring.h> 
+#include <sdsudriver_par.h> 
+#include <sdsudriver_struct.h>
+#include <interface.h>
+#include <mcexml_par.h>
+#include <mcexml_struct.h>
+#include <mcexml.h>
+
+#include "Dits_Err.h"       /* for error codes      */
+#include "DitsTypes.h"      /* For basic Dits types */
+#include "DitsFix.h"        /* Fixed part details   */
+#include "DitsInteraction.h"/* For DitsTrigger      */
+#include "Ers.h"            /* For Ers routines     */
+#include "mess.h"           /* For Mess routines    */
+#include "arg.h"            /* For Arg routines     */
+#include "DitsMsgOut.h"     /* for MsgOut           */
+#include "DitsSys.h"        /* For Dits system routines         */
+#include "DitsUtil.h"       /* For DitsErrorText                */
+#include "Sdp.h"            /*  for the parameter system */
+#include "Git.h"
+#include "sds.h"            /* for SDS stuff */
+#include "jit.h"            /* For jit stuff */
+#include "DitsParam.h"
+#include "DitsSignal.h"
+#include "DitsOrphan.h"
 
 //parameter name
 typedef struct  
@@ -781,3 +677,5 @@ int  maxpeakSize;      //= sizeof(MAX_P2P)*TOTALCH
 int  totalservoSize;   //= headSize + frameSize + peakSize + maxpeakSize;
 int  totaldataperBias; //=COL_NUM*setup->fdbkNo;
 }  SERVO_INFO;
+
+#endif

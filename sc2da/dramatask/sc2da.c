@@ -14,7 +14,6 @@
  * PPARC).
  *
  * Web: www.roe.ac.uk
- *sc2da_Abort
  *
  * The DRAMA task handles all DRAMA communications and actions between MCE and
  * RTS  Client. 
@@ -110,60 +109,6 @@
  *  Revision 1.81  2011/04/16 02:36:06  cwalther
  *  Took hard return out of MsgOut becasue DRAMA adds one anyway
  *
- *  Revision 1.80  2010/12/04 00:29:36  cwalther
- *  Removing changing select_clk each time as it was crashing the MCE
- *
- *  Revision 1.79  2010/12/03 02:31:41  cwalther
- *  Took out some messages that were swamping the RTS Client with 8 arrays
- *
- *  Revision 1.78  2010/10/21 02:01:28  cwalther
- *  Removed optimal-sq1bias-sq2fb from CONFIG_HARD it is in scratch now
- *
- *  Revision 1.77  2010/10/07 23:32:14  cwalther
- *  Trying to make the log file more useable
- *
- *  Revision 1.76  2010/10/06 19:10:56  cwalther
- *  removing row_dly caused a loop to go through too many times
- *
- *  Revision 1.75  2010/10/06 02:04:45  cwalther
- *  Removed row_dly so array got one shorter
- *
- *  Revision 1.74  2010/10/06 00:00:35  cwalther
- *  Return errors on problems while heater tracking
- *
- *  Revision 1.73  2010/09/30 20:09:42  cwalther
- *  Changes made while for engineering with science mode
- *
- *  Revision 1.72  2010/09/23 18:55:56  cwalther
- *  Changes for reading mce state and writing it to a file during CONFIGURE
- *
- *  Revision 1.71  2010/08/31 02:40:37  cwalther
- *  Changes for handling the clock strickly as UBC has told us
- *
- *  Revision 1.70  2010/08/30 19:32:47  cwalther
- *  Changes for reading complete MCE status and writing it out as a stringified AST object
- *
- *  Revision 1.69  2010/08/03 22:16:10  cwalther
- *  Changes to make sc2_setup work with SC2SCRATCH
- *
- *  Revision 1.68  2010/07/19 20:00:19  cwalther
- *  Changes to make the clocks exclusively external or internal and not mixed
- *
- *  Revision 1.67  2010/04/19 22:03:30  cwalther
- *  changes to put dark heater current into FITS headers
- *
- *  Revision 1.66  2010/03/04 01:32:54  cwalther
- *  Changes for heater tracking memory and setting back to defaults in the dark
- *
- *  Revision 1.65  2010/02/26 18:27:01  cwalther
- *  Changed some MsgOuts into jitDebugs
- *
- *  Revision 1.64  2010/02/19 00:29:10  cwalther
- *  Changes to make fast flat fields work
- *
- *  Revision 1.63  2010/01/26 22:27:24  cwalther
- *  Changes for getting kicks of SEQUENCE to be benign - a fastflatfield comment
- *
  *  Revision 1.1.1.1  2007/05/16 08:26:57  dkelly
  *  first insertion
  *
@@ -222,14 +167,6 @@
 #include "jcmt/state.h"
 #include "star/hds_types.h"
 
-// in INSTALL_INCLUDE 
-// from dream and sc2store sc2headman
-#include <dream_par.h>
-#include <sc2store.h>
-#include <sc2headman.h>
-//include from scuba2Rtsc
-#include <sc2rtsc_par.h>
-
 /*** where it defines 
    #define SC2RTSC__DATUMSH      1 
    #define SC2RTSC__DATUMHOT     2
@@ -238,23 +175,17 @@
    #define SC2RTSC__MCERESET     32
 *******/
 
-
-/* in {INCDIR} */  
-#include <sdsudriver_err.h> 
-#include <sdsudriver_errstring.h> 
-#include <sdsudriver_par.h> 
-#include <sdsudriver_struct.h>
-#include <interface.h>
-#include <mcexml_par.h>
-#include <mcexml_struct.h>
-#include <mcexml.h>
+#include "sc2da_inc.h"
 
 //
 #include "sc2da_par.h"
 #include "sc2da_actionstate.h"
 #include "sc2da_struct.h"
 #include "sc2da_err.h"
-#include "sc2dalib.h"     
+#include "sc2dalib.h"
+#include "sc2da_heat.h"
+#include "sc2da_mce.h"
+#include "sc2da_utils.h"
 #include "sc2dalibsetup.h"      
 #include "sc2dalibservo.h"           
 #include "sc2daliblckpts.h"           
@@ -269,7 +200,6 @@ static struct mcexml_struct glbMceInx;
 static char                 taskName[30]; 
 static int                  pixelMask[41*32];
 static int                  heaterMask[40*32];
-static double               heaterSlope[40*32];
 static char                 dvCmdEx[]="wb cc use_dv 2";   
 static char                 dvCmdInt[]="wb cc use_dv 0";
 static char                 syncCmdEx[]="wb cc use_sync 2";      
@@ -378,7 +308,6 @@ char **argv
     { sc2da_SetSeq,   sc2da_SetSeqKick, 0, 0, 0, 0, "SETUP_SEQUENCE"},
     { sc2da_Seq,         sc2da_SeqKick, 0, 0, 0, 0, "SEQUENCE"},
     { sc2da_EndObs,      sc2da_ObsKick, 0, 0, 0, 0, "END_OBSERVATION"},
-    
     { sc2da_Batch,                    0, 0, 0, 0, 0, "MCEBATCHGO"},  
     { sc2da_Downld2PCI,               0, 0, 0, 0, 0, "DWLOADDSP" },  // only PCI
     { sc2da_Down2FPGA,                0, 0, 0, 0, 0, "DWLOADFPGA"},
@@ -430,7 +359,7 @@ char **argv
   errNo--;
   
   // Initialise global flags, after the shareDmem is established
-  sc2dalib_variablesInit(con,&dasInfo,Cols,Rows,pixelMask, status);
+  utils_init_variables(con,&dasInfo,Cols,Rows,pixelMask, status);
 
   // Allocate buffers for storing the acquisition data
   *status = (StatusType) sdsu_allocate_buffers(con,dasInfo.bufSize);
@@ -463,7 +392,7 @@ char **argv
   jitDebugSet( dasInfo.debuglvl, status );
 
   //  Initialise parameter system and create parameters  and msg queue
-  sc2dalib_createSDP(&dasInfo, status);
+  utils_create_SDP(&dasInfo, status);
   if( *status !=STATUS__OK )
   {
     printf ("sc2da: Failed to create parameters/queue \n"); 
@@ -563,20 +492,18 @@ void sc2da_Abort
 StatusType *status
 )
 {
-  int          rval;
-  char         dateTime[40];
-  long               in_sequence;
+  char          dateTime[40];
+  long          in_sequence;
 
   if (*status != STATUS__OK) return;
   errno=0;   
-  rval=sc2dalib_finddateTime(DAS_DATETIME,dateTime);
+  utils_get_time(DAS_DATETIME,dateTime);
   // update debug, check if it is in DA_MCE_SEQ setup actionFlag
-  //sc2dalib_abortInit(con,&dasInfo,dateTime,status);
   SdpGeti("IN_SEQUENCE", &in_sequence, status);
   if(in_sequence != DA_MCE_SEQ)
   {
     *status=DITS__APP_ERROR;	
-    ErsRep(0,status, "sc2da_Abort: DA is not in SEQUENCE application!!" );
+    ErsRep(0,status, "sc2da_Abort: DA is not in SEQUENCE application." );
     return;
   }
   dasInfo.actionFlag=ABORTACTION;  
@@ -585,7 +512,7 @@ StatusType *status
   sc2dalib_stopFrame(con,&dasInfo,&glbMceInx,dateTime,status);  
   if (*status != STATUS__OK)  
   {
-    ErsRep(0,status, "sc2da_Abort: sc2dalib_stopFramefailed");
+    ErsRep(0,status, "sc2da_Abort: sc2dalib_stopFrame failed.");
   }
   else
    jitDebug(4,"sc2da_Abort: the action has completed\n");     
@@ -620,7 +547,6 @@ void sc2da_Batch
 StatusType *status
 )
 {
-  int                     rval;
   DitsDeltaTimeType       timeout;
   char                    *glbmsgPtr,*lclmsgPtr; 
   static DRAMA_INNERMSG   dramamsg;
@@ -635,7 +561,7 @@ StatusType *status
   //check if it is start or completion.
   if(DitsGetSeq()==0)
   {
-    rval=sc2dalib_finddateTime(DAS_DATETIME,dateTime);
+    utils_get_time(DAS_DATETIME,dateTime);
     // update debug, check if it is in DA_MCE_NONE setup actionFlag
     // read in args from cmd, set msgwrtPt, msgreadPT=0; 
     sc2dalib_batchInit(con,&dasInfo,dateTime,status);
@@ -657,10 +583,10 @@ StatusType *status
                dasInfo.trkNo,batchCmd.mceCmd);
       usleep(batchDelay);
       
-      sc2dalib_Cmd(con,&dasInfo,&batchCmd,dateTime,status);
+      mce_cmd(con,&dasInfo,&batchCmd,dateTime,status);
       if (*status != STATUS__OK)
       {
-        ErsRep(0,status,"sc2da_Batch: sc2dalib_Cmd failed");
+        ErsRep(0,status,"sc2da_Batch: mce_cmd failed");
         sc2dalib_actionfileEnd(con,&dasInfo,0,status);
         return;
       }
@@ -689,7 +615,7 @@ StatusType *status
 	if (dasInfo.filesvFlag == 5)
 	  {
 	    dasInfo.astMapState=2;
-	    sc2dalib_Cmd(con,&dasInfo,&batchCmd,dateTime,status);
+	    mce_cmd(con,&dasInfo,&batchCmd,dateTime,status);
 	  }
       }
       sc2dalib_actionfileEnd(con,&dasInfo,0,status);
@@ -727,10 +653,10 @@ StatusType *status
                    dasInfo.trkNo,batchCmd.mceCmd);
         usleep(batchDelay);
 
-        sc2dalib_Cmd(con,&dasInfo,&batchCmd,dateTime,status);
+        mce_cmd(con,&dasInfo,&batchCmd,dateTime,status);
         if (*status != STATUS__OK)
         {
-          ErsRep(0,status,"sc2da_Batch: sc2dalib_Cmd failed");
+          ErsRep(0,status,"sc2da_Batch: mce_cmd failed");
           sc2dalib_actionfileEnd(con,&dasInfo,0,status);
           return;
         }  
@@ -766,8 +692,8 @@ StatusType *status
     {
       *status=DITS__APP_ERROR;
       {
-        sc2dalib_msgprintSave(&dasInfo,
-           "sc2da_Batch: ERROR:%s",dramamsg.errRep,USE_ERSREP,status);
+        utils_msg(&dasInfo, "sc2da_Batch: ERROR:%s",dramamsg.errRep,
+                  USE_ERSREP,status);
       }
       con->process.seqstatus=SEQ_ERROR;
       sc2dalib_actionfileEnd(con,&dasInfo,0,status);
@@ -831,19 +757,18 @@ void sc2da_Config
 (
 StatusType *status
 )
-{   	        
-  int          rval;
-  char  dateTime[40];
-  char  obsMode[FILE_LEN],configFile[FILE_LEN];
-  char  shellcmd[]="checkForSc2dadh";
-  SdsIdType argId;
-  char  filename[FILE_LEN];
-  char  myTaskName[10];
-  double timeout;
+{
+  char          dateTime[40];
+  char          obsMode[FILE_LEN],configFile[FILE_LEN];
+  char          shellcmd[]="checkForSc2dadh";
+  SdsIdType     argId;
+  char          filename[FILE_LEN];
+  char          myTaskName[10];
+  double        timeout;
 
   if (*status != STATUS__OK) return;
 
-  rval=sc2dalib_finddateTime(DAS_DATETIME,dateTime);
+  utils_get_time(DAS_DATETIME,dateTime);
   fprintf(dasInfo.fpLog,"\n<%s> start of sc2da_Config XXXX",dateTime);
 
   //If we were previously initialised, set all other flags to zero 
@@ -862,8 +787,8 @@ StatusType *status
    }
 
 
-  rval=sc2dalib_finddateTime(DAS_DATETIME,dateTime);
-  fprintf(dasInfo.fpLog,"\n<%s> sc2da_Config after checking for dhtask XXXX",dateTime);
+  utils_get_time(DAS_DATETIME,dateTime);
+  fprintf(dasInfo.fpLog,"\n<%s> sc2da_Config found dhtask XXXX",dateTime);
 
   // update debug, check if it is in DA_MCE_NONE setup actionFlag
   // read in args from cmd 
@@ -875,7 +800,7 @@ StatusType *status
     return;
   }
   jitDebug(2,"sc2da_Config: CONFIGURATION<%s>\n", configFile);
-  rval=sc2dalib_finddateTime(DAS_DATETIME,dateTime);
+  utils_get_time(DAS_DATETIME,dateTime);
   fprintf(dasInfo.fpLog,"\n<%s> sc2da_Config after sc2dalib_configInit XXXX",dateTime);
 
 
@@ -890,7 +815,7 @@ StatusType *status
 	return;
       }
 
-    rval=sc2dalib_finddateTime(DAS_DATETIME,dateTime);
+    utils_get_time(DAS_DATETIME,dateTime);
     fprintf(dasInfo.fpLog,"\n<%s> sc2da_Config after sc2headman_config XXXX",dateTime);
 
 
@@ -919,7 +844,7 @@ StatusType *status
 	return;
       }
 
-  rval=sc2dalib_finddateTime(DAS_DATETIME,dateTime);
+  utils_get_time(DAS_DATETIME,dateTime);
   fprintf(dasInfo.fpLog,"\n<%s> sc2da_Config after reading the MCE configuration XXXX",dateTime);
 
 
@@ -932,7 +857,7 @@ StatusType *status
 
   // pass parameter got from CONFIGURE to sharedMem
   sc2dalib_configInitSet(&dasInfo,dateTime,obsMode, configFile,status);
-  rval=sc2dalib_finddateTime(DAS_DATETIME,dateTime);
+  utils_get_time(DAS_DATETIME,dateTime);
   fprintf(dasInfo.fpLog,"\n<%s> sc2da_Config after sc2dalib_configInitSet XXXX",dateTime);
  
 
@@ -950,7 +875,7 @@ StatusType *status
     }
   }
 
-  rval=sc2dalib_finddateTime(DAS_DATETIME,dateTime);
+  utils_get_time(DAS_DATETIME,dateTime);
   fprintf(dasInfo.fpLog,"\n<%s> sc2da_Config after sc2headman_startenviro  XXXX",dateTime);
 
   MsgOut(status,"Ending CONFIGURE action");
@@ -1001,14 +926,13 @@ void sc2da_Downld2PCI
 StatusType *status
 )
 {
-  int  rval;
-  char dspfile[FILE_LEN];
-  char dateTime[40];
+  char          dspfile[FILE_LEN];
+  char          dateTime[40];
   
    
   if (*status != STATUS__OK) return;
 
-  rval=sc2dalib_finddateTime(DAS_DATETIME,dateTime);
+  utils_get_time(DAS_DATETIME,dateTime);
 
   // update debug, check if it is in DA_MCE_NONE setup actionFlag
   // read in args from cmd 
@@ -1189,11 +1113,10 @@ StatusType *status
 )
 {
   char              dateTime[40];
-  int               rval;
   long              init=0,in_sequence;
   DitsDeltaTimeType timeout;
 
-  rval=sc2dalib_finddateTime(DAS_DATETIME,dateTime);
+  utils_get_time(DAS_DATETIME,dateTime);
   SdpGeti("INITIALISED",&init,status);
   if ( init ) 
      fprintf(dasInfo.fpLog,"\n<%s> CMD from sc2da_Exit\n",
@@ -1263,12 +1186,12 @@ StatusType *status
        fclose(dasInfo.fpLog);
     dasInfo.fpLog = NULL;
 
-    jitDebug(2,"sc2da_Exit: call sc2dalib_closesharedMem\n");
+    jitDebug(2,"sc2da_Exit: call utils_close_memory\n");
     // move to here in case no data cmd is issued before
-    sc2dalib_closesharedMem(&dasInfo,SHAREDM_PAR,status);
+    utils_close_memory(&dasInfo,SHAREDM_PAR,status);
     if (*status != STATUS__OK) 
     {
-      ErsRep(0,status,"sc2da_Exit: sc2dalib_closesharedMem failed");
+      ErsRep(0,status,"sc2da_Exit: utils_close_memory failed");
     }
 
     jitDebug(2,"sc2da_Exit: call DitsPutRequest ( DITS_REQ_EXIT) \n");
@@ -1306,7 +1229,7 @@ StatusType *status
  
   if (dasInfo.doneReadxml )
   {
-    sc2dalib_readmceVal(con,&dasInfo,&glbMceInx,arrayID, &mcePort,1,status);
+    mce_read(con,&dasInfo,&glbMceInx,arrayID, &mcePort,1,status);
     if (*status != STATUS__OK)
       return;
     for (i=0; i<MAX_SUBARRAY; i++)
@@ -1351,24 +1274,23 @@ void sc2da_Heatslope
 StatusType *status    /* global status (given and returned) */
 )
 { 
-  int         rval;
   static char dateTime[40];
 
   if (*status != STATUS__OK) return;
 
-  rval=sc2dalib_finddateTime(DAS_DATETIME,dateTime);
-  jitDebug(16,"sc2da_Heatslope: call sc2dalib_heaterslopeInit\n");     
-  sc2dalib_heaterslopeInit(con, &dasInfo,dateTime, status);
+  utils_get_time(DAS_DATETIME,dateTime);
+  jitDebug(16,"sc2da_Heatslope: call heat_init_slope\n");     
+  heat_init_slope(con, &dasInfo,dateTime, status);
   if (*status != STATUS__OK)
   {
-    ErsRep(0,status,"sc2da_Heatslope: sc2daheaterslopeInit failed"); 
+    ErsRep(0,status,"sc2da_Heatslope: heat_init_slope failed"); 
     sc2dalib_actionfileEnd(con,&dasInfo,1,status); 
     return;
   }
-  sc2dalib_heaterSlope(&dasInfo,heaterMask,heaterSlope,status);
+  heat_slope(&dasInfo,heaterMask,heaterSlope,status);
   if (*status != STATUS__OK)
   {
-    ErsRep(0,status,"sc2da_Heatslope: sc2daheaterSlope failed"); 
+    ErsRep(0,status,"sc2da_Heatslope: heat_slope failed"); 
   }
   sc2dalib_actionfileEnd(con,&dasInfo,0,status); 
 }
@@ -1458,10 +1380,10 @@ StatusType *status
 
   if (*status != STATUS__OK) return;
 
-  sc2dalib_heaterslopeRead(&dasInfo,heaterSlope,status);
+  heat_read_slope(&dasInfo,heaterSlope,status);
   if (*status != STATUS__OK)
   {
-    ErsRep(0,status,"sc2da_Heatersloperead: sc2dalib_heaterslopeRead failed");
+    ErsRep(0,status,"sc2da_Heatersloperead: heat_read_slope failed");
     return;
   }  
   if (dasInfo.fpLog != NULL)
@@ -1512,7 +1434,7 @@ void sc2da_Init
 StatusType *status
 )
 {  
-  int        rval, mcePort, i;
+  int        mcePort, i;
   char       xmlfile[FILE_LEN];
   char       arrayName[40];
   SdsIdType  id;
@@ -1520,7 +1442,7 @@ StatusType *status
 
   if (*status != STATUS__OK) return;
 
-  rval=sc2dalib_finddateTime(DAS_DATE,dasInfo.Date); 
+  utils_get_time(DAS_DATE,dasInfo.Date); 
 
   //If we were previously initialised, set all other flags to zero 
   SdpPuti("CONFIGURED",0,status);
@@ -1689,14 +1611,13 @@ void sc2da_Mcecmd
 StatusType *status
 )
 {
-  int           rval;
   dasCmdInfo_t  mymceCmd;
   char          *token,*dupcmd;
   char          dateTime[40];
    
   if (*status != STATUS__OK) return;
 
-  rval=sc2dalib_finddateTime(DAS_DATETIME,dateTime);
+  utils_get_time(DAS_DATETIME,dateTime);
 
   // update debug, check if it is in DA_MCE_NONE setup actionFlag
   // read in args from cmd 
@@ -1746,8 +1667,8 @@ StatusType *status
   else
   {
     // all errors message have been displayed in mceErrRep
-    sc2dalib_dispResults(&dasInfo,&mymceCmd,status);
-    sc2dalib_chkChecksum(&dasInfo,&mymceCmd,status);
+    mce_results(&dasInfo,&mymceCmd,status);
+    mce_checksum(&dasInfo,&mymceCmd,status);
     if (*status != STATUS__OK)
     {
       ErsRep(0,status,"sc2da_Mcecmd: the action completed with error"); 
@@ -1784,13 +1705,12 @@ void sc2da_Mceonflycmd
 StatusType *status
 )
 {
-  int           rval;
   char          *token,*dupcmd;
   char          dateTime[40];
    
   if (*status != STATUS__OK) return;
 
-  rval=sc2dalib_finddateTime(DAS_DATETIME,dateTime);
+  utils_get_time(DAS_DATETIME,dateTime);
 
   // update debug, check if it is in DA_MCE_NONE setup actionFlag
   // read in args from cmd 
@@ -1835,7 +1755,7 @@ void sc2da_MceStatus
 StatusType *status
 )
 {
-  int         i, rval;
+  int         i, rflag;
   static char   dateTime[40];
   static char   *notRBCMD[]=
 {
@@ -1883,7 +1803,7 @@ StatusType *status
   if (*status != STATUS__OK) return;
 
   // Check whether this is the start or completion  
-  rval=sc2dalib_finddateTime(DAS_DATETIME,dateTime);   
+  utils_get_time(DAS_DATETIME,dateTime);   
   // update debug, check if it is in DA_MCE_SEQ setup actionFlag
   sc2dalib_mcestatusInit(con,&dasInfo,dateTime,status);
   if (*status != STATUS__OK)
@@ -1918,16 +1838,16 @@ StatusType *status
         break;
       }
       jitDebug(2,"cmd: %s\n", mymceCmd.mceCmd);
-      rval=0;
+      rflag=0;
       for (i=0; i<75; i++) 
 	{
 	  if ( strcmp(mymceCmd.mceCmd, notRBCMD[i]) == 0)
 	    {
-	      rval=1;
+	      rflag=1;
 	      break;
 	    } 
 	}
-      if( rval==0)
+      if( rflag==0)
       {
         sc2dalib_sendCmd(con,&dasInfo,&mymceCmd,&glbMceInx,dateTime,status);
         *status=STATUS__OK;
@@ -1977,11 +1897,10 @@ StatusType *status
   long        memValue;
   char        cmd[CMD_LEN],memType[10];
   char        dateTime[40];
-  int         rval;
   
   if (*status != STATUS__OK) return;
 
-  rval=sc2dalib_finddateTime(DAS_DATETIME,dateTime);
+  utils_get_time(DAS_DATETIME,dateTime);
   sc2dalib_pcicmdInit(con,&dasInfo,cmd,memType,&memAddr,&memValue,
                   dateTime,status);
   if( *status!=STATUS__OK)
@@ -2025,11 +1944,10 @@ StatusType *status
   long        blkSize=64;
   char        cmd[CMD_LEN],memType[10];
   char        dateTime[40];
-  int         rval;
   
   if (*status != STATUS__OK) return;
 
-  rval=sc2dalib_finddateTime(DAS_DATETIME,dateTime);
+  utils_get_time(DAS_DATETIME,dateTime);
   strcpy(cmd,"READ");
   sc2dalib_pciblkInit(con,&dasInfo,cmd,memType,&startAddr,&blkSize,
                   dateTime,status);
@@ -2126,7 +2044,7 @@ void sc2da_Pixelmon
 StatusType *status    
 )
 {
-  int           rval, wait;
+  int           wait;
   uint32        *longword;
   char           *glbmsgPtr,*lclmsgPtr; 
   static DRAMA_INNERMSG    dramamsg;
@@ -2141,7 +2059,7 @@ StatusType *status
 
   if(DitsGetSeq()==0)
   {
-    rval=sc2dalib_finddateTime(DAS_DATETIME,dateTime);
+    utils_get_time(DAS_DATETIME,dateTime);
     // initial dasInfo.cmdFlag=0;
     sc2dalib_pixelmonInit(con,&dasInfo,&pixelCmd,&glbMceInx,dateTime,&pixelSet,status);
     if (*status != STATUS__OK)
@@ -2279,7 +2197,7 @@ StatusType *status
     {
       con->process.seqstatus=SEQ_ERROR; 
       *status=DITS__APP_ERROR;
-      sc2dalib_msgprintSave(&dasInfo,
+      utils_msg(&dasInfo,
                "sc2da_Pixelmon: Error: %s",dramamsg.errRep,USE_ERSREP,status);
       sc2dalib_actionfileEnd(con,&dasInfo,0,status); 
     }
@@ -2309,10 +2227,9 @@ StatusType *status
 )
 {
   char    dateTime[40];
-  int     rval;
   int     msgreadPt;
 
-  rval=sc2dalib_finddateTime(DAS_DATETIME,dateTime);
+  utils_get_time(DAS_DATETIME,dateTime);
   fprintf(dasInfo.fpLog,"\n<%s> CMD from sc2da_pixelKick \n",
           dateTime);
 
@@ -2436,8 +2353,7 @@ StatusType *status
 )
 {
 
-  char       dateTime[FILE_LEN];
-  int        rval;
+  char       dateTime[40];
   static struct sc2headman_par  headPar;
   SC2STORETelpar telpar;
   PAR_SHARED *parshmPtr;
@@ -2452,7 +2368,7 @@ StatusType *status
       return;
     }
 
-  rval=sc2dalib_finddateTime(DAS_DATETIME,dateTime);
+  utils_get_time(DAS_DATETIME,dateTime);
   sc2dalib_setseqInit(con,&dasInfo,&glbMceInx,dateTime,status);
   if ( !StatusOkP(status) )
   {
@@ -2524,24 +2440,22 @@ StatusType *status
   }
   if (dasInfo.engFlag==RTSC_MODE)
   {
-    sc2dalib_setmceVal(con,&dasInfo,&glbMceInx,syncCmdEx,status); 
-    sc2dalib_setmceVal(con,&dasInfo,&glbMceInx,dvCmdEx,status); 
-    // sc2dalib_setmceVal(con,&dasInfo,&glbMceInx,selClkCmdEx,status); 
+    mce_set(con,&dasInfo,&glbMceInx,syncCmdEx,status); 
+    mce_set(con,&dasInfo,&glbMceInx,dvCmdEx,status);
     if ( !StatusOkP(status))   
       {
-        ErsRep(0,status,"sc2da_SetSeq: failed after calls to sc2dalib_setmceVal to set clock source external");
+        ErsRep(0,status,"sc2da_SetSeq: failed after calls to mce_set to set clock source external");
         return;
       }
     jitDebug(8 ,"sc2da_Setseq: MCE to use external clocks during SEQ ");
   }
   else // For engineering mode set the clocking all internal
     {
-      sc2dalib_setmceVal(con,&dasInfo,&glbMceInx,syncCmdInt,status); 
-      sc2dalib_setmceVal(con,&dasInfo,&glbMceInx,dvCmdInt,status); 
-      // sc2dalib_setmceVal(con,&dasInfo,&glbMceInx,selClkCmdInt,status); 
+      mce_set(con,&dasInfo,&glbMceInx,syncCmdInt,status); 
+      mce_set(con,&dasInfo,&glbMceInx,dvCmdInt,status);
       if ( !StatusOkP(status))   
 	{
-	  ErsRep(0,status,"sc2da_SetSeq: failed after calls to sc2dalib_setmceVal to set clock source internal");
+	  ErsRep(0,status,"sc2da_SetSeq: failed after calls to mce_set to set clock source internal");
 	  return;
 	}
       jitDebug(8 ,"sc2da_Setseq: MCE to use internal clocks during SEQ ");
@@ -2610,7 +2524,7 @@ void sc2da_Seq
 StatusType *status
 )
 { 
-  int               rval, *tmpData;
+  int               *tmpData;
   double            seq_time;          
   char              *glbmsgPtr,*lclmsgPtr; 
   char              dateTime[40];
@@ -2629,20 +2543,20 @@ StatusType *status
   if (!StatusOkP(status)) return;
 
   // Check whether it is the start or completion of a sequence 
-  if(DitsGetSeq()==0)
+  if(DitsGetSeq() == 0)
   {
     errorDetected = 0;
     dataDone = 0;
     dasInfo.headersDone = 1;
-    if (dasInfo.engFlag==RTSC_MODE) 
+    if(dasInfo.engFlag == RTSC_MODE) 
       dasInfo.headersDone= 0;
-    jitDebug(2,"sc2da_Seq: call sc2dalib_finddateTime\n");  
-    rval=sc2dalib_finddateTime(DAS_DATETIME,dateTime);
+    jitDebug(2,"sc2da_Seq: call utils_get_time\n");  
+    utils_get_time(DAS_DATETIME,dateTime);
 
     // set the ith sequence NO we are waiting for in dasInfo.ithseqWait
     jitDebug(2,"sc2da_Seq: call sc2dalib_seqInit\n");  
     sc2dalib_seqInit(con,&dasInfo,dateTime,&lookupTable,status);
-    if ( !StatusOkP(status) )
+    if( !StatusOkP(status) )
     {
       ErsRep(0,status,"sc2da_Seq: sc2dalib_seqInit failed"); 
       sc2dalib_seqEnd(con,&dasInfo, lookupTable,status);
@@ -2660,22 +2574,22 @@ StatusType *status
     SdpGeti("SEQ_END", &seqEnd, status);
     MsgOut(status ,"sc2da_Seq: seqStart = %ld seqEnd = %ld",seqStart, seqEnd); 
       // call sc2headman_seqstart
-    if (dasInfo.engFlag==RTSC_MODE)
+    if(dasInfo.engFlag==RTSC_MODE)
     {
-       sc2dalib_seqcallsc2headmanseqStart(&dasInfo, seqStart, seqEnd,status);
-       if ( !StatusOkP(status) )
-       {
-         sc2dalib_seqEnd(con,&dasInfo,lookupTable, status);
-         return;
-       }
+      sc2dalib_seqcallsc2headmanseqStart(&dasInfo, seqStart, seqEnd,status);
+      if ( !StatusOkP(status) )
+      {
+        sc2dalib_seqEnd(con,&dasInfo,lookupTable, status);
+        return;
+      }
 
-       sc2headman_getobsidss(OBSIDSS_SIZE, obsidss, status);
-       strncpy(dasInfo.parshmPtr->obsidss,obsidss,OBSIDSS_SIZE); 
+      sc2headman_getobsidss(OBSIDSS_SIZE, obsidss, status);
+      strncpy(dasInfo.parshmPtr->obsidss,obsidss,OBSIDSS_SIZE); 
     }
     //send No_frames parameter to MCE and a GO to MCE
     //  dasInfo.msgwrtPt=0; dasInfo.msgreadPt=0;con->datacount=end-start+1
     sc2dalib_frametakeInit(con,&dasInfo,seqStart,seqEnd,&glbMceInx,dateTime,status);
-    if (!StatusOkP(status)) 
+    if(!StatusOkP(status)) 
     {
       ErsRep(0,status, "sc2da_Seq: sc2dalib_frametakeInit failed");
       sc2dalib_stopFrame(con,&dasInfo,&glbMceInx,dateTime,status);  
@@ -2751,177 +2665,141 @@ StatusType *status
         else if (dramamsg.reason==FRAME_CHKSUMWRONG)
         { 
           // carry on if checksum is wrong 1 use ErsOut,*status=STATUS__OK;  
-          sc2dalib_msgprintSave(&dasInfo,"CHKSUMWRONG %s",dramamsg.errRep,USE_ERSOUT,status);
+          utils_msg(&dasInfo,"CHKSUMWRONG %s",dramamsg.errRep,USE_ERSOUT,status);
           *status=STATUS__OK;  
           // dhtask is going to use read_data_timed after first frame,
           // this is OK now without timeout
           DitsPutRequest(DITS_REQ_SLEEP, status);
           return;
         }
-	/* We are finished with this step of heater/bias ramp/sawtooth so take another step */
-	else if (dramamsg.reason==FRAME_SAW_RAMP && dasInfo.sawtoothRampFlag > 0)
-	  {
+  	/* We are finished with this step of heater/bias ramp/sawtooth so take another step */
+  	else if (dramamsg.reason==FRAME_SAW_RAMP && dasInfo.sawtoothRampFlag > 0)
+  	{
+      /* If I have already had an error just go back and wait for the next message */
+      if(errorDetected)
+      {
+    		DitsPutRequest(DITS_REQ_SLEEP, status);
+    		return;
+      }
+      /* Is it a heater current something? */
+      if(dasInfo.sawtoothRampFlag < 3)
+      {
+  		  heat_step_current(con, &dasInfo, &glbMceInx, status);
+      }
+      else /* It is a bias something */
+      {
+    		heat_step_TES(con, &dasInfo, &glbMceInx, status);
+      }
 
-	    /* If I have already had an error just go back and wait for the next message */
-	    if(errorDetected)
-	      {
-		DitsPutRequest(DITS_REQ_SLEEP, status);
-		return;
-	      }
+      /* If we got an MCE error, do about what we do when we get kicked */
+      if(*status != STATUS__OK)
+      {
+    		errorDetected = 1;
 
-	    /* Is it a heater current something? */
-	    if(dasInfo.sawtoothRampFlag < 3)
-	      {
-		sc2dalib_stepHeaterCurrent(con, &dasInfo, &glbMceInx, status);
-	      }
-	    else /* It is a bias something */
-	      {
-		sc2dalib_stepTESBias(con, &dasInfo, &glbMceInx, status);
-	      }
+    		/* First annul the error because nothing else can happen with bad error status */
+    		ErsAnnul( status );
 
-	    /* If we got an MCE error, do about what we do when we get kicked */
-	    if(*status != STATUS__OK)
-	      {
+    		localStatus = DITS__APP_ERROR;
+    		ErsRep(0, &localStatus,"Classic MCE error detected - will ignore for now"); 
+      }
 
-		errorDetected = 1;
+      DitsPutRequest(DITS_REQ_SLEEP, status);
+      return;
+    }
+    else if (dramamsg.reason==FRAME_SQ2FBCMP && dasInfo.gotsq2fbparaFlag==1)
+    { 
+      // dasInfo.gotsq2fbparaFlag and myInfo->parshmPtr->sq2fbparaFlag are set in setseqInit
+      // in RTSC mode, SQ2FB_GETPARA action will have myInfo->parshmPtr->sq2fbparaFlag=1 for SEQ
+      tmpData=(int*)dramamsg.data;
+      jitDebug(2,"sc2da_Seq : updatesq2fb frameNum= %d\n", tmpData);
 
-		/* First annul the error because nothing else can happen with bad error status */
-		ErsAnnul( status );
-
-		localStatus = DITS__APP_ERROR;
-		ErsRep(0, &localStatus,"Classic MCE error detected - will ignore for now"); 
-
-		/* Now abort the sequence
-		   sc2da_Abort(status); */
-
-		/* Request to be re-run again this time with abort status
-		DitsPutRequest ( DITS_REQ_STAGE, status );
-		return; */
-	      }
-
-	    DitsPutRequest(DITS_REQ_SLEEP, status);
-	    return;
-	  }
-        else if (dramamsg.reason==FRAME_SQ2FBCMP && dasInfo.gotsq2fbparaFlag==1)
-        { 
-          // dasInfo.gotsq2fbparaFlag and myInfo->parshmPtr->sq2fbparaFlag are set in setseqInit
-          // 
-          // in RTSC mode, SQ2FB_GETPARA action will have myInfo->parshmPtr->sq2fbparaFlag=1 for SEQ
-          tmpData=(int*)dramamsg.data;
-          jitDebug(2,"sc2da_Seq : updatesq2fb frameNum= %d\n", tmpData);
-
-           // tmpData[0] is frameNo, inside changesq2fb, if we use "param-read bc2 flux_fb 32"
-          // it will tell us if all change to sq2fb is right, as it writes 
-          // for (j=0;j<32;j++) val=frameNo+j ; to sq2fb
-      
-          sc2dalib_changesq2fbVal(con,&dasInfo,&glbMceInx,dateTime,tmpData,status);
-/*
-          //  need to use dasInfo.trkNo(=0 when DitGetSeq()=0)
-          //  to set zfact[i]=data[i] if trkNo=0;
-          sc2dalib_updatesq2fbVal(con,&dasInfo,&glbMceInx,dateTime,dramamsg.data, &setup0,
-                                  setup0.sq2fdbkOpt,status);
-*/
-          if ( !StatusOkP(status) )
-          { 
-            ErsRep(0,status,"sc2da_seq: sc2dalib_updatesq2fbVal failed"); 
-
-           // status is saved and returned
-           //sc2dalib_stopFrame(con,&dasInfo,&glbMceInx,dateTime,status);  
-
-            //  check and display msg, postsem(intask)
-            *status=STATUS__OK;
-            sc2dalib_seqchkEnd(con,&dramamsg,&dasInfo,status);
-            wait_sem(con->inner_sem,0);          
-            sc2dalib_seqEnd(con,&dasInfo,lookupTable,status);
-            return;
-          }
-          dasInfo.trkNo ++;
+      // tmpData[0] is frameNo, inside changesq2fb, if we use "param-read bc2 flux_fb 32"
+      // it will tell us if all change to sq2fb is right, as it writes 
+      // for (j=0;j<32;j++) val=frameNo+j ; to sq2fb
+        
+      sc2dalib_changesq2fbVal(con,&dasInfo,&glbMceInx,dateTime,tmpData,status);
+      /*
+       * need to use dasInfo.trkNo(=0 when DitGetSeq()=0)
+       * to set zfact[i]=data[i] if trkNo=0;
+       * sc2dalib_updatesq2fbVal(con,&dasInfo,&glbMceInx,dateTime,dramamsg.data, &setup0,
+       *                             setup0.sq2fdbkOpt,status);
+       */
+      if ( !StatusOkP(status) )
+      { 
+        ErsRep(0,status,"sc2da_seq: sc2dalib_updatesq2fbVal failed"); 
+        // status is saved and returned
+        //sc2dalib_stopFrame(con,&dasInfo,&glbMceInx,dateTime,status);  
+        //  check and display msg, postsem(intask)
+        *status=STATUS__OK;
+        sc2dalib_seqchkEnd(con,&dramamsg,&dasInfo,status);
+        wait_sem(con->inner_sem,0);          
+        sc2dalib_seqEnd(con,&dasInfo,lookupTable,status);
+        return;
+      }
+      dasInfo.trkNo ++;
+      DitsPutRequest(DITS_REQ_SLEEP, status);
+      return;
+    }
+    else
+    {
+      dataDone = 1;
+      jitDebug(2,"sc2da_Seq: received FRAME trig\n");
+      if  ( dramamsg.reason ==FRAME_COMPLETION )
+      {
+        // if it is monitor task, headerDone is set during seqchkQL
+        if (dasInfo.headersDone !=1)  // wait for header collection
+        {
+          MsgOut(status,"sc2da_Seq: wait for headersDone,FRAME_COMPLETION");
           DitsPutRequest(DITS_REQ_SLEEP, status);
           return;
         }
-
-        else
-        {
-	  dataDone = 1;
-          jitDebug(2,"sc2da_Seq: received FRAME trig\n");
-          if  ( dramamsg.reason ==FRAME_COMPLETION )
-          {
-            // if it is monitor task, headerDone is set during seqchkQL
-            if (dasInfo.headersDone !=1)  // wait for header collection
-            {
-              MsgOut(status,"sc2da_Seq: wait for headersDone,FRAME_COMPLETION");
-              DitsPutRequest(DITS_REQ_SLEEP, status);
-              return;
-            }
-          }
-          else
-          {
-             // also check other .reason and display msg, postsem(intask)
-             sc2dalib_seqchkEnd(con,&dramamsg,&dasInfo,status);
-             wait_sem(con->inner_sem,0);
-             // get time in seconds since EPOCH 
-             time(&tloc);
-             seq_time=difftime(tloc,newtloc); 
- 
-             if(dramamsg.reason !=FRAME_STOPPED)
-               sc2dalib_stopFrame(con,&dasInfo,&glbMceInx,dateTime,status);  
-  
-             sc2dalib_seqEnd(con,&dasInfo,lookupTable,status);
-             MsgOut(status,"sc2da_seq: seq ended");
-             return;
-          }
-        }
-        break;
       }
+      else
+      {
+        // also check other .reason and display msg, postsem(intask)
+        sc2dalib_seqchkEnd(con,&dramamsg,&dasInfo,status);
+        wait_sem(con->inner_sem,0);
+        // get time in seconds since EPOCH 
+        time(&tloc);
+        seq_time=difftime(tloc,newtloc); 
+
+        if(dramamsg.reason !=FRAME_STOPPED)
+          sc2dalib_stopFrame(con,&dasInfo,&glbMceInx,dateTime,status);  
+
+        sc2dalib_seqEnd(con,&dasInfo,lookupTable,status);
+        MsgOut(status,"sc2da_seq: seq ended");
+        return;
+      }
+    }
+    break;
+    }
     case DITS_REA_RESCHED: 
       {
 	if( dasInfo.actionFlag == ABORTACTION) /* I was kicked and now I want to end the action */
-	  {
-	    int endsubSeq;
-	    MsgOut(status,"sc2da_seq: ABORTACTION is TRUE - ending SEQUENCE");
+  {
+    MsgOut(status,"sc2da_seq: ABORTACTION is TRUE - ending SEQUENCE");
 
-	    /* Giving this semaphore lies to the dhtask telling it all of the headers are ready */
-	    post_sem(con->intask_sem,0);
+    /* Giving this semaphore lies to the dhtask telling it all of the headers are ready */
+    post_sem(con->intask_sem,0);
 
-	    /* Now lie to ourselves in case dhtask gives FRAME_COMPLETION */
-	    /*dataDone = 1; set by FRAME trigger*/
-	    dasInfo.headersDone = 1;
-	    dasInfo.ithseqWait = (int)seqEnd;
+    /* Now lie to ourselves in case dhtask gives FRAME_COMPLETION */
+    /*dataDone = 1; set by FRAME trigger*/
+    dasInfo.headersDone = 1;
+    dasInfo.ithseqWait = (int)seqEnd;
 
-            /* NOTE:  The method below seems to work okay if a single task messed up,
-               but leaves the DA tasks hanging if the user hits ABORT.
-            */
-
-//             /* Lie to sc2headman so it thinks all task headers are ready */
-//             endsubSeq = *(lookupTable + dasInfo.headerreadNo);
-//             sc2headman_settaskseq(endsubSeq, status);
-// 
-//             /* Lie about entry reason to seqchkQL, let it handle post_sem, dasInfo, etc. */
-//             entReason = DITS_REA_ASTINT;
-//             dramamsg.reason = FRAME_TRIGQL;
-//             dasInfo.headtaskchkFlag=1;
-//             sc2dalib_seqchkQL(con,&dramamsg,&dasInfo,entReason,lookupTable,status);
-//             if ( !StatusOkP(status) )
-//             {
-//               ErsRep(0,status,"sc2da_Seq: sc2dalib_seqchkQL failed\n");
-//               ErsFlush(status);
-//               /* post_sem(con->intask_sem,0) ??? */
-//               return;
-//             }
-
-	    /* Go back to sleep and wait for another trigger */
-	    DitsPutRequest(DITS_REQ_SLEEP, status);
-	    return;
-	  }
+    /* Go back to sleep and wait for another trigger */
+    DitsPutRequest(DITS_REQ_SLEEP, status);
+    return;
+  }
 	else
-	  {
-	    *status = DITS__APP_TIMEOUT;
-	    ErsRep(0, status, "Timeout waiting for frame ");
-	    fprintf(dasInfo.fpLog,"sc2da_Seq: Timeout waiting for frame\n");
-	    sc2dalib_stopFrame(con,&dasInfo,&glbMceInx,dateTime,status);  
-	    sc2dalib_seqEnd(con,&dasInfo,lookupTable,status);
-	    return;
-	  }
+  {
+    *status = DITS__APP_TIMEOUT;
+    ErsRep(0, status, "Timeout waiting for frame ");
+    fprintf(dasInfo.fpLog,"sc2da_Seq: Timeout waiting for frame\n");
+    sc2dalib_stopFrame(con,&dasInfo,&glbMceInx,dateTime,status);  
+    sc2dalib_seqEnd(con,&dasInfo,lookupTable,status);
+    return;
+  }
 	  break;
       }
       case DITS_REA_TRIGGER:  // trigged by para monitor
@@ -3069,7 +2947,6 @@ StatusType *status
 )
 {  
   char    dateTime[40];
-  int     rval;
 
   if (!StatusOkP(status)) return;
 
@@ -3079,7 +2956,7 @@ StatusType *status
   strcpy( headPar.status,"ERROR");
   sc2headman_putsc2par(headPar,status); */
 
-  rval=sc2dalib_finddateTime(DAS_DATETIME,dateTime);
+  utils_get_time(DAS_DATETIME,dateTime);
   fprintf(dasInfo.fpLog,"\n<%s> CMD from sc2da_SeqKick\n",dateTime);
   sc2da_Abort(status);  
   if ( !StatusOkP(status) )  
@@ -3122,7 +2999,7 @@ void sc2da_Servo
 StatusType *status    /* global status (given and returned) */
 )
 { 
-  int                   rval, seq;
+  int                   seq;
   char                  *byte;
   double                seq_time;
   char                  tmp[FILE_LEN];
@@ -3145,7 +3022,7 @@ StatusType *status    /* global status (given and returned) */
   {
     dataBuf=NULL;
     ssalckdataBuf=NULL;
-    rval=sc2dalib_finddateTime(DAS_DATETIME,dateTime);
+    utils_get_time(DAS_DATETIME,dateTime);
     jitDebug(16,"sc2da_Servo: call sc2daservoInit\n");     
     sc2daservoInit(con,&dasInfo,&servoCmd,&glbMceInx,&setup,
                    dateTime,&dataBuf,&ssalckset,&ssalckdataBuf, status);
@@ -3162,12 +3039,12 @@ StatusType *status    /* global status (given and returned) */
        no DV from the RTS when it is being used, so set the clocks all
        internal */
 
-    sc2dalib_setmceVal(con,&dasInfo,&glbMceInx,syncCmdInt,status); 
-    sc2dalib_setmceVal(con,&dasInfo,&glbMceInx,dvCmdInt,status); 
-    // sc2dalib_setmceVal(con,&dasInfo,&glbMceInx,selClkCmdInt,status); 
+    mce_set(con,&dasInfo,&glbMceInx,syncCmdInt,status); 
+    mce_set(con,&dasInfo,&glbMceInx,dvCmdInt,status); 
+    // mce_set(con,&dasInfo,&glbMceInx,selClkCmdInt,status); 
     if ( !StatusOkP(status))   
       {
-        ErsRep(0,status,"sc2da_Servo: failed after calls to sc2dalib_setmceVal");
+        ErsRep(0,status,"sc2da_Servo: failed after calls to mce_set");
         sc2daservoEnd(con,&dasInfo,&setup,dataBuf,ssalckdataBuf,1,status);
         return;
       }
@@ -3268,9 +3145,9 @@ StatusType *status    /* global status (given and returned) */
           *status=sdsu_command_mce (con,servoCmd.cmdBuf,&servoCmd.reply);
           if( *status !=SDSU_OK )
           { 
-            sc2dalib_mceerrRep(&dasInfo,&servoCmd,status);
+            mce_error_reply(&dasInfo,&servoCmd,status);
             *status=DITS__APP_ERROR;         
-            ErsRep(0, status,"sc2da_Servo: sc2dalib_mceerrRep failed"); 
+            ErsRep(0, status,"sc2da_Servo: mce_error_reply failed"); 
             sc2daservoEnd(con,&dasInfo,&setup,dataBuf,ssalckdataBuf,0,status);          
             return;
           }
@@ -3376,7 +3253,7 @@ StatusType *status    /* global status (given and returned) */
           // get time in seconds since EPOCH 
           time(&newtloc);
           seq_time=difftime(newtloc,tloc); 
-          rval=sc2dalib_finddateTime(DAS_DATETIME,dateTime);   
+          utils_get_time(DAS_DATETIME,dateTime);   
           fprintf(dasInfo.fpLog,"\n<%s> CMD from sc2da_Servo end (1)\n",dateTime);
 	  /*          fprintf(dasInfo.fpLog,"Totaltime ~= <%f>s  DitsGetSeq()=%ld\n",
 		      seq_time,DitsGetSeq()); */
@@ -3390,7 +3267,7 @@ StatusType *status    /* global status (given and returned) */
         // get time in seconds since EPOCH 
         time(&newtloc);
         seq_time=difftime(newtloc,tloc); 
-        rval=sc2dalib_finddateTime(DAS_DATETIME,dateTime);   
+        utils_get_time(DAS_DATETIME,dateTime);   
         fprintf(dasInfo.fpLog,"\n<%s> CMD from sc2da_Servo end (2)\n",dateTime);
         /* fprintf(dasInfo.fpLog,"Totaltime ~= <%f>s  DitsGetSeq()=%ld\n",
 	   seq_time,DitsGetSeq()); */
@@ -3406,16 +3283,16 @@ StatusType *status    /* global status (given and returned) */
       *status=DITS__APP_ERROR;
       if(dramamsg.reason==FRAME_ERRGETPASSBUF)
       {
-        sc2dalib_msgprintSave(&dasInfo,
+        utils_msg(&dasInfo,
           "sc2da_Servo: Ended with TIMEOUT for data buffer","",USE_ERSREP,status);
       }
       else if (dramamsg.reason==FRAME_CHKSUMWRONG)
       {
-        sc2dalib_msgprintSave(&dasInfo,
+        utils_msg(&dasInfo,
         "sc2da_Servo: Ended with CHKSUMWRONG %s",dramamsg.errRep,USE_ERSREP,status);
       }
       else 
-        sc2dalib_msgprintSave(&dasInfo,
+        utils_msg(&dasInfo,
 	    "sc2da_Servo: %s",dramamsg.errRep,USE_ERSREP,status);
 
       sc2daservoEnd(con,&dasInfo,&setup,dataBuf,ssalckdataBuf,0,status);
@@ -3447,10 +3324,9 @@ StatusType *status
 )
 {
   char    dateTime[40];
-  int     rval;
   int     msgreadPt;
 
-  rval=sc2dalib_finddateTime(DAS_DATETIME,dateTime);
+  utils_get_time(DAS_DATETIME,dateTime);
   fprintf(dasInfo.fpLog,"\n<%s> CMD from sc2da_servoKick \n",
           dateTime);
   dasInfo.actionFlag=SERVOKICK; 
@@ -3677,7 +3553,7 @@ void sc2da_Trksq2fb
 StatusType *status    
 )
 {
-  int             rval,i,wait;
+  int             i,wait;
   uint32          mceBufsize;
   char            tmpPara[FILE_LEN]="";
   char            *byte;
@@ -3694,18 +3570,18 @@ StatusType *status
 
   if(DitsGetSeq()==0)
   {
-    rval=sc2dalib_finddateTime(DAS_DATETIME,dateTime);
+    utils_get_time(DAS_DATETIME,dateTime);
 
     /* This routine will NOT work with external clocks because there is
        no DV from the RTS when it is being used so set the clocking to
        all internal here */
 
-    sc2dalib_setmceVal(con,&dasInfo,&glbMceInx,syncCmdInt,status); 
-    sc2dalib_setmceVal(con,&dasInfo,&glbMceInx,dvCmdInt,status); 
-    // sc2dalib_setmceVal(con,&dasInfo,&glbMceInx,selClkCmdInt,status); 
+    mce_set(con,&dasInfo,&glbMceInx,syncCmdInt,status); 
+    mce_set(con,&dasInfo,&glbMceInx,dvCmdInt,status); 
+    // mce_set(con,&dasInfo,&glbMceInx,selClkCmdInt,status); 
     if ( !StatusOkP(status))   
       {
-        ErsRep(0,status,"sc2da_TrkSq2Fb: failed after calls to sc2dalib_setmceVal");
+        ErsRep(0,status,"sc2da_TrkSq2Fb: failed after calls to mce_set");
         return;
       }
 
@@ -3912,7 +3788,7 @@ StatusType *status
     {
       con->process.seqstatus=SEQ_ERROR; 
       *status=DITS__APP_ERROR;
-      sc2dalib_msgprintSave(&dasInfo,
+      utils_msg(&dasInfo,
                "sc2da_Trksq2fb: Error: %s",glbMsg[dasInfo.msgreadPt].errRep,USE_ERSREP,status);
       sc2dalib_actionfileEnd(con,&dasInfo,0,status); 
       if (setup.slopSelect[5]==0)
@@ -3960,7 +3836,6 @@ void sc2da_Trkheat
 StatusType *status    
 )
 {
-  int           rval;
   int           *word32;
   int           keepTracking;
   char          *glbmsgPtr,*lclmsgPtr; 
@@ -3986,29 +3861,29 @@ StatusType *status
     /* DEBUG for abort testing */
     MsgOut(status, "sc2da_Trkheat: entered DitsGetSeq()=0");
 
-    rval=sc2dalib_finddateTime(DAS_DATETIME,dateTime);
+    utils_get_time(DAS_DATETIME,dateTime);
 
     /* This routine will NOT work with external clocks because there is no DV
        from the RTS when it is being used so set all of the clocking to internal */
 
-    sc2dalib_setmceVal(con,&dasInfo, &glbMceInx, syncCmdInt, status); 
-    sc2dalib_setmceVal(con,&dasInfo, &glbMceInx, dvCmdInt, status); 
-    // sc2dalib_setmceVal(con,&dasInfo, &glbMceInx, selClkCmdInt, status); 
+    mce_set(con,&dasInfo, &glbMceInx, syncCmdInt, status); 
+    mce_set(con,&dasInfo, &glbMceInx, dvCmdInt, status); 
+    // mce_set(con,&dasInfo, &glbMceInx, selClkCmdInt, status); 
     if ( !StatusOkP(status))   
       {
-        ErsRep(0,status,"sc2da_Trkheat: failed after calls to sc2dalib_setmceVal");
+        ErsRep(0,status,"sc2da_Trkheat: failed after calls to mce_set");
         return;
       }
 
     /* DEBUG for abort testing */
-    MsgOut(status, "sc2da_Trkheat: starting sc2dalib_trkheatInit()");
+    MsgOut(status, "sc2da_Trkheat: starting heat_init_track()");
 
     //Initialise for heater tracking
 
-    sc2dalib_trkheatInit(con,&dasInfo,&trkheatCmd,&glbMceInx,dateTime,status);
+    heat_init_track(con,&dasInfo,&trkheatCmd,&glbMceInx,dateTime,status);
     if ( !StatusOkP(status) )
     {
-      ErsRep(0,status,"sc2da_Trkheat: sc2dalib_trkheatInit failed");
+      ErsRep(0,status,"sc2da_Trkheat: heat_init_track failed");
       sc2dalib_actionfileEnd(con,&dasInfo,1,status); 
       return;
     }  
@@ -4082,15 +3957,15 @@ StatusType *status
             sends the new value to heater DAC
         */
         // it will always be a full size of the data
-        sc2dalib_trkheatUpdate(con,&dasInfo,&glbMceInx,word32,heaterSlope,status);
+        heat_update_track(con,&dasInfo,&glbMceInx,word32,heaterSlope,status);
         if (!StatusOkP(status)) 
         {
-          ErsRep(0,status, "sc2da_Trkheat: sc2dalib_trkheatUpdate failed");
+          ErsRep(0,status, "sc2da_Trkheat: heat_update_track failed");
           sc2dalib_actionfileEnd(con,&dasInfo,0,status); 
           return;
         }
          usleep(10000);
-        /// only go is needed here, can use sc2dalib_Cmd, which saves all cmd 
+        /// only go is needed here, can use mce_cmd, which saves all cmd 
         // and reply but takes time and will result in a huge logfile
         *status=sdsu_command_mce(con,trkheatCmd.cmdBuf,&trkheatCmd.reply);
         if ( *status != SDSU_OK)
@@ -4122,11 +3997,11 @@ StatusType *status
 	   (strncmp(shutterState,"CLOSED",6) == 0))
 	  {
 	    sprintf(heatCmd, "wb bc1 bias %d", dasInfo.darkHeaterI);
-	    sc2dalib_setmceVal(con, &dasInfo, &glbMceInx, heatCmd, status);
+	    mce_set(con, &dasInfo, &glbMceInx, heatCmd, status);
             /* fprintf(dasInfo.fpLog, "_Trkheat %s",heatCmd); */ 
 	    if ( !StatusOkP(status) )
 	      {
-		ErsRep(0,status,"sc2dalib_Trkheat: sc2dalib_setmceval(1) %s failed",heatCmd); 
+		ErsRep(0,status,"sc2dalib_Trkheat: mce_set(1) %s failed",heatCmd); 
 		return;
 	      }
 	  }
@@ -4136,22 +4011,22 @@ StatusType *status
 
 	// read the current heater setting and store as the nominal
 
-	sc2dalib_readmceVal(con, &dasInfo, &glbMceInx, heatVal, &dasInfo.nominalPixelHeat,1,status);
+	mce_read(con, &dasInfo, &glbMceInx, heatVal, &dasInfo.nominalPixelHeat,1,status);
 	if (!StatusOkP(status)) 
 	  {
-	    ErsRep(0,status, "sc2da_Trkheat: sc2dalib_readmceVal failed to read heater value"); 
+	    ErsRep(0,status, "sc2da_Trkheat: mce_read failed to read heater value"); 
 	    return;
 	  }
 	MsgOut(status, "sc2da_Trkheat: The nominal heater current is: %d",dasInfo.nominalPixelHeat);
 
 	/* Set all the clocks to external again */
 
-	sc2dalib_setmceVal(con,&dasInfo, &glbMceInx, syncCmdEx, status); 
-	sc2dalib_setmceVal(con,&dasInfo, &glbMceInx, dvCmdEx, status); 
-	// sc2dalib_setmceVal(con,&dasInfo, &glbMceInx, selClkCmdEx, status); 
+	mce_set(con,&dasInfo, &glbMceInx, syncCmdEx, status); 
+	mce_set(con,&dasInfo, &glbMceInx, dvCmdEx, status); 
+	// mce_set(con,&dasInfo, &glbMceInx, selClkCmdEx, status); 
 	if ( !StatusOkP(status))   
 	  {
-	    ErsRep(0,status,"sc2da_Trkheat: failed after calls to sc2dalib_setmceVal (external clocks)");
+	    ErsRep(0,status,"sc2da_Trkheat: failed after calls to mce_set (external clocks)");
 	    return;
 	  }
 
@@ -4170,7 +4045,7 @@ StatusType *status
       MsgOut(status,"sc2da_Trkheat: The dramamsg.reason is %d\n",(int)dramamsg.reason);
       con->process.seqstatus=SEQ_ERROR; 
       *status=DITS__APP_ERROR;
-      sc2dalib_msgprintSave(&dasInfo,
+      utils_msg(&dasInfo,
 			    "sc2da_Trkheat: Error: %s",dramamsg.errRep,USE_ERSREP,status);
       sc2dalib_actionfileEnd(con,&dasInfo,0,status);
 
@@ -4200,13 +4075,12 @@ StatusType *status
 )
 {
   char    dateTime[40];
-  int     rval;
   int     msgreadPt;
   SdsIdType arg;
   char shutterStatus[DITS_C_NAMELEN];
   int valIndex;
 
-  rval=sc2dalib_finddateTime(DAS_DATETIME,dateTime);
+  utils_get_time(DAS_DATETIME,dateTime);
   fprintf(dasInfo.fpLog,"\n<%s> CMD from sc2da_trkKick \n",
           dateTime);
   dasInfo.actionFlag=TRKKICK; 
@@ -4263,8 +4137,7 @@ void sc2da_UpdateLogname
 (
 StatusType *status
 )
-{ 
-  int  rval;
+{
   char dateTime[40];
  
   if (!StatusOkP(status)) return;
@@ -4277,12 +4150,12 @@ StatusType *status
        seqStatus[dasInfo.actionFlag]);
     return;
   } 
-  rval=sc2dalib_finddateTime(DAS_DATE,dateTime);
+  utils_get_time(DAS_DATE,dateTime);
   if( strcmp(dateTime,dasInfo.Date)!=0 )
   {
     strcpy(dasInfo.logfileName,dasInfo.logFile);
     strcat(dasInfo.logfileName,dasInfo.Date);
-    my_fclose(&(dasInfo.fpLog));
+    utils_fclose(&(dasInfo.fpLog));
     if ((dasInfo.fpLog = fopen64(dasInfo.logfileName,"a")) == NULL)
     {
       *status = DITS__APP_ERROR;
@@ -4295,7 +4168,7 @@ StatusType *status
     myFpLog = dasInfo.fpLog;
 
     dasInfo.glbCount=0;
-    my_fclose(&(dasInfo.fpLog));
+    utils_fclose(&(dasInfo.fpLog));
   }
   jitDebug(4,"mceFindDate: the action has completed, the logfileName=%s\n",
             dasInfo.logfileName );
@@ -4329,7 +4202,7 @@ StatusType *status
   // Check whether this is the start or completion  
   if(DitsGetSeq()==0)
   {
-    rval=sc2dalib_finddateTime(DAS_DATETIME,dateTime);   
+    utils_get_time(DAS_DATETIME,dateTime);   
     // update debug, check if it is in DA_MCE_SEQ setup actionFlag
     sc2dalib_versionInit(con,&dasInfo,dateTime,status);
     if ( !StatusOkP(status) )
@@ -4379,8 +4252,7 @@ void mceTryChkSum
 (
 StatusType *status
 )
-{ 
-  int         rval;  	        
+{  	        
   char        *insertPtr1;
   long      checksum, *insertPtr;
   DitsArgType argId;
@@ -4416,7 +4288,7 @@ StatusType *status
     ErsRep(0,status,"TryChkSum: failed to get args");
     return;
   }
-  rval=sc2dalib_finddateTime(DAS_DATETIME,dateTime);
+  utils_get_time(DAS_DATETIME,dateTime);
   dasInfo.filesvFlag=0;//no save to fpMcecmd
   fprintf(dasInfo.fpLog,"\n<%s> CMD from mceTryChkSum\n",dateTime);
 
@@ -4431,15 +4303,15 @@ StatusType *status
   *insertPtr=checksum;
   con->testflag=1;
   
-  sc2dalib_Cmd(con,&dasInfo,&chksumCmd,dateTime,status);
+  mce_cmd(con,&dasInfo,&chksumCmd,dateTime,status);
   if ( *status !=STATUS__OK)
   {     
-    ErsRep(0,status,"TryChkSum: Failed after call to sc2dalib_Cmd");  
+    ErsRep(0,status,"TryChkSum: Failed after call to mce_cmd");  
     return;
   }
   // all errors message have been displayed in mceErrRep
-  sc2dalib_dispResults(&dasInfo,&chksumCmd,status);
-  sc2dalib_chkChecksum(&dasInfo,&chksumCmd,status);
+  mce_results(&dasInfo,&chksumCmd,status);
+  mce_checksum(&dasInfo,&chksumCmd,status);
   if ( !StatusOkP(status) )
   {
     ErsRep(0,status,"TryChkSum: the action completed with error"); 
@@ -4471,8 +4343,7 @@ void mceTest
 (
 StatusType *status
 )
-{  
-  int         rval;
+{
   long      repeatNo, i,inctranslateCall=0;
   double      seq_time;
   char         dateTime[40];
@@ -4506,7 +4377,7 @@ StatusType *status
     ErsRep(0,status,"mceTest: failed to get args"); 
     return;
   }
-  rval=sc2dalib_finddateTime(DAS_DATETIME,dateTime);
+  utils_get_time(DAS_DATETIME,dateTime);
   dasInfo.filesvFlag=0;//no save to fpMcecmd
   fprintf(dasInfo.fpLog,"\n<%s> CMD from mceTest\n",dateTime);
   sc2dalib_getcmdBuf(&dasInfo,&testCmd,&glbMceInx,status);
@@ -4533,13 +4404,13 @@ StatusType *status
     *status=sdsu_command_mce(con,testCmd.cmdBuf,&testCmd.reply);
     if( *status !=SDSU_OK)
     { 
-      sc2dalib_mceerrRep(&dasInfo,&testCmd,status); 
+      mce_error_reply(&dasInfo,&testCmd,status); 
       dasInfo.cmdFlag=1;
       *status=DITS__APP_ERROR;
       ErsRep (0, status,"mceTest: the action ended with error"); 
       return;
     }
-    sc2dalib_chkChecksum(&dasInfo,&testCmd,status);
+    mce_checksum(&dasInfo,&testCmd,status);
     if ( !StatusOkP(status) )
     {
       ErsRep(0,status,"mceTest: the action completed with error"); 
@@ -4555,12 +4426,12 @@ StatusType *status
   if(inctranslateCall)
   {
     MsgOut(status,
-      "mceTest: The loop includes{mceXMLtranslate; send/get cmd/reply; sc2dalib_chkChecksum} " );    
+      "mceTest: The loop includes{mceXMLtranslate; send/get cmd/reply; mce_checksum} " );    
   }
   else
   {
     MsgOut(status, 
-      "mceTest: The loop includes {send/get cmd/reply; sc2dalib_chkChecksum} " );
+      "mceTest: The loop includes {send/get cmd/reply; mce_checksum} " );
   }
   MsgOut(status,"mceTest: the action has completed");
 }
@@ -4587,13 +4458,13 @@ void sc2da_Getsq2fbPara
 StatusType *status    
 )
 {
-  int             rval,i;
+  int             i;
   static char     dateTime[40];
   static dasCmdInfo_t getsq2fbParaCmd;
  
   if (!StatusOkP(status)) return;
 
-  rval=sc2dalib_finddateTime(DAS_DATETIME,dateTime);
+  utils_get_time(DAS_DATETIME,dateTime);
   //  sq2fb set to setup->initFB
   sc2dalib_getsq2fbparaInit(con,&dasInfo,&getsq2fbParaCmd,&glbMceInx,dateTime,&setup0,status);
   if ( !StatusOkP(status) )

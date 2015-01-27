@@ -1,21 +1,9 @@
 #ifndef HEADGEN____sc2dalib_h
 #define HEADGEN____sc2dalib_h 
  
+static int  stripchFlag;
+static int  totalStairCount;
  
-/*+ my_fclose
-*/
-void my_fclose(FILE **fp);
-
-
-/**
- * my_closeFiles
- * Closes myInfo-> (fpData, fpMcecmd, fpBatch, Strchart, fpOtheruse)
- *  Flushes log file.
- *  Stat: used 2 times
- */
-/*+ my_closeFiles
-*/
-void my_closeFiles(dasInfoStruct_t *myInfo);
 
 // =======sc2dalib_a*******
 //====================//
@@ -40,17 +28,6 @@ SDSU_CONTEXT    *con,
 dasInfoStruct_t *myInfo,      
 int             flag,
 StatusType      *status
-);
-
-/*+ sc2dalib_allctsharedMem   
- */
-void sc2dalib_allctsharedMem
-(
-SDSU_CONTEXT       *con,         
-dasInfoStruct_t    *myInfo,
-int                startSeq,
-int                endSeq,
-StatusType         *status
 );
 
 /*+ sc2dalib_batchInit
@@ -89,15 +66,6 @@ void sc2dalib_callbkMsg
 (
 USED4DITS    *argptr,    
 StatusType   *status
-);
-
-/*+ sc2dalib_closesharedMem   
- */
-void sc2dalib_closesharedMem
-(
-dasInfoStruct_t    *myInfo,
-int                whichShared,
-StatusType         *status
 );
 
 /*+ sc2dalib_changeSQVal
@@ -203,30 +171,6 @@ dasInfoStruct_t  *myInfo,
 StatusType       *status
 );
 
-/*+ sc2dalib_createQLSDS
- */
-void sc2dalib_createQLSDS
-(
-dasInfoStruct_t  *myInfo,
-StatusType       *status
-);
-
-/*+ sc2dalib_updateQLSDS
- */
-void sc2dalib_updateQLSDS
-(
-SDSU_CONTEXT     *con,
-dasInfoStruct_t  *myInfo,
-int              *coaddnumPtr,
-double           *timePtr,
-char             *fitsPtr,
-uint32           *fitsDim,    // fits dimension [0] size_n, [1] num_n
-double           *coadddataPtr,
-uint32           *dataDim,      // data dimension [0] col_n, [1] row_n
-char             *scanfileName,
-StatusType       *status
-);
-
 /*+ sc2dalib_cnvtbatch2Cmd
 */
 void sc2dalib_cnvtbatch2Cmd
@@ -293,14 +237,6 @@ dasInfoStruct_t *myInfo,
 StatusType      *status
 );
 
-/*+ int sc2dalib_finddateTime 
- */
-int sc2dalib_finddateTime
-(
-short         which,
-char          *dateArray
-);
-
 /*+ sc2dalib_frametakeInit   
  */
 void sc2dalib_frametakeInit
@@ -342,17 +278,6 @@ void sc2dalib_healthStatus
 int        which,
 int        health,
 StatusType *status
-);
-
-/*+ sc2dalib_initHeatBiasHandling
-*/
-void sc2dalib_initHeatBiasHandling
-(
-SDSU_CONTEXT          *con,      
-dasInfoStruct_t       *myInfo,
-struct mcexml_struct  *mceInxpt,   
-int                   *flag,
-StatusType            *status
 );
 
 /*+ sc2dalib_initInit
@@ -416,45 +341,6 @@ const char *fname,
 StatusType *status
 );
 
-/*+ sc2dalib_heaterslopeInit
-*/
-void sc2dalib_heaterslopeInit
-(
-SDSU_CONTEXT      *con,
-dasInfoStruct_t   *myInfo, 
-char              *dateTime,
-StatusType         *status
-);
-
-/*+ sc2dalib_heaterSlope
-*/
-void sc2dalib_heaterSlope
-(
-dasInfoStruct_t  *myInfo,
-int              *heaterMask,
-double           *heaterSlope,
-StatusType        *status
-);
-
-/*+ sc2dalib_heaterslopeRead
-*/
-void sc2dalib_heaterslopeRead
-(
-dasInfoStruct_t   *myInfo,    
-double            *pixelSlope,
-StatusType        *status
-);
-
-/*+ sc2dalib_heaterslopeSave
-*/
-void sc2dalib_heaterslopeSave
-(
-dasInfoStruct_t *myInfo,
-double          *heaterSlope,
-StatusType      *status
-
-);
-
 /*+ sc2dalib_mcecmdInit
 */
 void sc2dalib_mcecmdInit
@@ -514,27 +400,6 @@ SDSU_CONTEXT          *con,
 dasInfoStruct_t       *myInfo,    
 char                  *dateTime,
 StatusType            *status
-);
-
-/*+ sc2dalib_msgprintSave
-*/
-void sc2dalib_msgprintSave
-(
-dasInfoStruct_t *myInfo, 
-char            *string, 
-char            *string2,
-int             flag,
-StatusType      *status
-);
-
-/*+ sc2dalib_openFiles
-*/
-void sc2dalib_openFiles
-(
-dasInfoStruct_t *myInfo,       
-int             getData,
-int             getBatch,
-StatusType      *status
 );
 
 /*+ sc2dalib_pcicmdInit
@@ -654,15 +519,6 @@ dasInfoStruct_t   *myInfo,
 int               *pixelMask,
 SdsIdType         maskId,
 StatusType        *status
-);
-
-/*+ sc2dalib_updateDebug 
-*/
-void sc2dalib_updateDebug
-(
-SDSU_CONTEXT    *con,
-dasInfoStruct_t *myInfo,
-StatusType      *status    
 );
 
 /*+ sc2dalib_saveframeData 
@@ -870,27 +726,6 @@ int             *lookupTable,
 StatusType      *status
 );
 
-/*+ sc2dalib_setsharedMem
-*/
-void sc2dalib_setsharedMem
-(                  
-SDSU_CONTEXT    *con,
-dasInfoStruct_t *myInfo,
-int             whichShared,
-int             sharedmemSize,  
-StatusType      *status
-);
-
-/*+ sc2dalib_stepHeaterCurrent
-*/
-void sc2dalib_stepHeaterCurrent
-(
-SDSU_CONTEXT          *con,      
-dasInfoStruct_t       *myInfo,
-struct mcexml_struct  *mceInxpt,   
-StatusType            *status
-);
-
 /*+ sc2dalib_stepTESBias
 */
 void sc2dalib_stepTESBias
@@ -912,30 +747,6 @@ char                 *dateTime,
 StatusType           *status
 );
 
-/*+ sc2dalib_trkheatInit
-*/
-void sc2dalib_trkheatInit
-(
-SDSU_CONTEXT          *con,      
-dasInfoStruct_t       *myInfo,    
-dasCmdInfo_t          *myCmd,
-struct mcexml_struct  *mceinxPtr,
-char                  *dateTime,
-StatusType            *status
-);
-
-/*+ sc2dalib_trkheatUpdate
- */
-void sc2dalib_trkheatUpdate
-(
-SDSU_CONTEXT         *con,         
-dasInfoStruct_t      *myInfo,
-struct mcexml_struct *mceInxpt,
-int                  *data,
-double               *slope,
-StatusType           *status
-);
-
 /*+ sc2dalib_getStats
  */
 void sc2dalib_getStats
@@ -947,23 +758,6 @@ void sc2dalib_getStats
  int n,
  double *avg,
  double *sigma
-);
-
-/*+ sc2dalib_trkheatpixelUpdate
- */
-void sc2dalib_trkheatpixelUpdate
-(
-dasInfoStruct_t      *myInfo,
-int                  heat,
-int                  *data,
-int                  *fdbkRef,
-int                  numActivePixels,
-int                  *activePixels,
-double               *slope,
-double               *heatVal,
-int                  first,
-int                  *pixelData,
-StatusType           *status
 );
 
 /*+ sc2dalib_getsq2fbparaInit
@@ -1102,18 +896,6 @@ void sc2dalib_trksq2fbsavesq2fbOPT
 (
 dasInfoStruct_t *myInfo,
 int             *sq2fbOpt,
-StatusType      *status
-);
-
-/*+ sc2dalib_variablesInit
-*/
-void sc2dalib_variablesInit
-(
-SDSU_CONTEXT    *con,
-dasInfoStruct_t *myInfo,
-long            cols,
-long            rows,
-int             *pixelMask,
 StatusType      *status
 );
 
@@ -1363,17 +1145,4 @@ int        flag,
 StatusType *status
 );
 
-/*+ sc2dalib_writearray2setupFile
-*/
-void sc2dalib_writearray2setupFile
-(
-FILE       *fp,
-char       *item,
-void       *array,
-int        flag,
-StatusType *status
-);
-
- 
- 
 #endif

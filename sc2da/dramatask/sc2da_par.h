@@ -1,3 +1,5 @@
+#ifndef sc2da_par_h
+#define sc2da_par_h
 /**
  * \file sc2da_par.h
  *
@@ -25,150 +27,12 @@
  *  Revision 1.41  2011/03/01 23:47:27  cwalther
  *  Added test for maximum gaini, set to zero if greater than maximum
  *
- *  Revision 1.40  2010/11/16 03:10:04  cwalther
- *  Added a simulate heater tracking bit to the heater tracking style
- *
- *  Revision 1.39  2010/09/30 20:09:42  cwalther
- *  Changes made while for engineering with science mode
- *
- *  Revision 1.38  2010/08/03 22:16:10  cwalther
- *  Changes to make sc2_setup work with SC2SCRATCH
- *
- *  Revision 1.37  2010/03/04 01:32:54  cwalther
- *  Changes for heater tracking memory and setting back to defaults in the dark
- *
- *  Revision 1.36  2010/02/19 00:29:10  cwalther
- *  Changes to make fast flat fields work
- *
- *  Revision 1.35  2010/01/26 22:24:42  cwalther
- *  corrected count comments in long enum structure
- *
- *  Revision 1.34  2009/12/15 23:31:17  cwalther
- *  Added more detailed status for malloc failures
- *
- *  Revision 1.33  2009/11/24 22:02:03  cwalther
- *  Code for displaying the counters for each STATE data event comming in
- *
- *  Revision 1.32  2009/11/18 22:22:26  cwalther
- *  Updated the comments so they counted the enum correctly - removed the unused (and commented out) modes
- *
- *  Revision 1.31  2009/10/21 01:48:40  xgao
- *  add changes for sq1lock and fluxperiod less than one ( mainly SQ2), 1p5
- *
- *  Revision 1.30  2009/09/22 00:04:22  cwalther
- *  Changes to flip rows and columns
- *
- *  Revision 1.29  2009/08/11 15:10:27  xgao
- *  update to UPDATE_SQ2FB SQ1LOCK and tidyup scripts
- *
- *  Revision 1.28  2009/01/27 03:19:14  cwalther
- *  Removed all references to modes other than SCAN, STARE and DREAM. Also started publising QL filenames for DARKs during SCANs
- *
- *  Revision 1.27  2009/01/07 19:39:16  cwalther
- *  Modifications for reading in the Integrator and proportional gains
- *
- *  Revision 1.26  2008/12/31 00:08:16  cwalther
- *  Changes to make Gao's mutipixel heater tracking work
- *
- *  Revision 1.25  2008/12/12 22:27:19  xgao
- *  sq2fb servo test
- *
- *  Revision 1.24  2008/08/14 02:56:09  cwalther
- *  These changes from Gao snuck in but I am going to commit them as they seem to do no harm
- *
- *  Revision 1.23  2008/08/07 01:49:35  cwalther
- *  Lots for changes for headers from Craig. Changes in handling events from Gao
- *
- *  Revision 1.22  2008/08/01 15:39:03  xgao
- *  add PIXELHEATER_SLOPE
- *
- *  Revision 1.21  2008/06/28 20:11:54  xgao
- *
- *  during initialise, call jitPathGet if SC2ENGMODE ==0 and 1. otherwise,don't call
- *  check if USEDV==1,    seq: before GO cmd, send dvCmd to MCE
- *                    trkheat: before GO cmd, send notdvCmd to MCE
- *                      servo: before GO cmd, send notdvCmd to MCE
- *  seq:    move DitsTriger after sc2headman_seqStart
- *  trkheat move DitsTriger after receiving first data frame
- *  add pixelMask action, after task loaded, pixelMask[]=1;
- *                        after pixelmask cmd, pixelMask[] is updated by pixelmask.xml
- *                        pixelMak[] is applied to I-Val for MCE
- *  take HELP off as jit will handle it
- *
- *  Revision 1.20  2008/06/05 00:43:43  cwalther
- *  Changes to get things working at JAC
- *
- *  Revision 1.19  2008/05/14 15:10:54  xgao
- *  update version as 0p48 after windowed DREAM
- *
- *  Revision 1.18  2008/05/02 13:37:45  xgao
- *   put right das version
- *
- *  Revision 1.17  2008/05/02 13:26:26  xgao
- *
- *  tested STARE/SCAN/DREAM without restart DAS. for DREAM, reconstruct Iamge
- *  from frames (don't call _flatten)  0p47
- *
- *  Revision 1.16  2008/04/24 15:12:02  xgao
- *  add Dream bef-BDK, tidy sc2da_struct.h
- *
- *  Revision 1.15  2008/03/28 16:40:08  xgao
- *  update for sc2headman 0p45
- *
- *  Revision 1.14  2008/03/07 15:30:04  xgao
- *  tidy up after doxygen 0p44, and merge from atc and cardiff
- *
- *  Revision 1.13  2008/02/20 15:08:42  xgao
- *  JAC AT tested STARE
- *
- *  Revision 1.12  2007/12/07 16:01:19  xgao
- *
- *  some modifications after SG array test, shutter only third open, new
- *  initialise.xml ( flatfile, INITFLAG) and configure.xml (DATA_MODE).
- *  negative pixHeat for loadv in SETU_SEQ. Add findheaterspike for processing
- *  heaterservo data for G/Tc.
- *
- *  Revision 1.11  2007/11/02 12:14:08  xgao
- *
- *  update to 0p33-021107, worked with JOC for INIT,CONFIG, SETUPSEQ, SEQ
- *
- *  Revision 1.10  2007/09/05 16:33:48  xgao
- *
- *  add heaterslope, trkHeater tested Ok, sq1Refbias and sq2Reffb always use the last one
- *  always do manual adjustment after optimal, fits4all is now in parShm, bigPhy=512M now
- *  0p21, ndf is turned on, tested with startmce-rtsc flatfield-seg
- *
- *  Revision 1.9  2007/08/10 16:38:54  xgao
- *
- *  minor change from 0p16-nondf, cablecorrect updates ssabiaslock
- *  and is controlled by slopSletect[9]. 0p17-nondf
- *
- *  Revision 1.8  2007/08/06 15:57:40  xgao
- *  re-organise servo setupfile, use include=. 0p16-nondf
- *
- *  Revision 1.7  2007/08/02 21:09:40  xgao
- *  fix three bugs after autoset run,0p15-nondf
- *
- *  Revision 1.6  2007/07/23 21:10:46  xgao
- *  second update to match ICD
- *
- *  Revision 1.5  2007/07/09 16:03:47  xgao
- *  consider eng and rtsc both firstStep
- *
- *  Revision 1.4  2007/06/18 23:20:08  xgao
- *  add functions for SCRIPTDAS
- *
- *  Revision 1.3  2007/06/14 17:58:17  xgao
- *  add filtedfunc for tesTransit, tidyup
- *
- *  Revision 1.2  2007/05/23 18:08:19  xgao
- *  use JCMTState, add a few actionstate. xg
- *
  *  Revision 1.1.1.1  2007/05/16 08:27:01  dkelly
  *  first insertion
  *
  */
 
+#include <stdio.h>
 
 // This is the message buffer size, see DitsInit.
  
@@ -798,3 +662,5 @@ typedef enum
 #define SQ2FB_UPDATE_WAIT 100
 
 FILE *myFpLog;
+
+#endif

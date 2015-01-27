@@ -1,6 +1,7 @@
 #ifndef HEADGEN____sc2da_h
 #define HEADGEN____sc2da_h 
- 
+
+static double               heaterSlope[40*32];
  
 /*+sc2da- main routine  extern int main
 */

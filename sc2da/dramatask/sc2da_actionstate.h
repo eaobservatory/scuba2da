@@ -1,3 +1,6 @@
+#ifndef sc2da_actionstate_h
+#define sc2da_actionstate_h
+
 /**
  * \file sc2da_actionstate.h
  *
@@ -267,3 +270,4 @@ static char *servoStatus[]=
 " "
 };
 
+#endif

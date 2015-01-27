@@ -3769,4 +3769,3 @@ StatusType      *status
     fprintf(myInfo->fpData,"\n");
   }
 }
-
